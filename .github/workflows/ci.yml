@@ -80,7 +80,7 @@ jobs:
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
-            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml"
+            /d:sonar.cs.opencover.reportsPaths="TestResults/CoverageReport/OpenCover.xml"
 
       - name: Build
         run: dotnet build CarRepairSagaOrchestrator.sln --configuration $BUILD_CONFIGURATION --no-restore
@@ -90,7 +90,7 @@ jobs:
           dotnet test CarRepairSagaOrchestrator.sln \
             --configuration $BUILD_CONFIGURATION \
             --no-build \
-            --collect:"XPlat Code Coverage;Format=opencover,cobertura" \
+            --collect:"XPlat Code Coverage;Format=cobertura" \
             --logger "trx;LogFileName=test-results.trx" \
             --results-directory TestResults
 
@@ -99,7 +99,7 @@ jobs:
           reportgenerator \
             -reports:"TestResults/**/coverage.cobertura.xml" \
             -targetdir:"TestResults/CoverageReport" \
-            -reporttypes:"HtmlInline_AzurePipelines;Cobertura;XmlSummary"
+            -reporttypes:"HtmlInline_AzurePipelines;Cobertura;XmlSummary;OpenCover"
 
       - name: Enforce coverage threshold (80%)
         run: |
@@ -129,13 +129,13 @@ jobs:
           PY
 
       - name: End SonarCloud analysis (quality gate)
-        if: ${{ success() && steps.sonar_begin.outcome == 'success' }}
-        run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
-
-      - name: End SonarCloud analysis after failed stages
-        if: ${{ failure() && steps.sonar_begin.outcome == 'success' }}
-        continue-on-error: true
-        run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+        if: ${{ always() && steps.sonar_begin.outcome == 'success' }}
+        run: |
+          if [ "${{ job.status }}" = "failure" ]; then
+            dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN" || true
+          else
+            dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+          fi
 
       - name: Docker build validation
         run: |
