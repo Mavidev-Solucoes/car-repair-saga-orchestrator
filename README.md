@@ -19,3 +19,13 @@ Microserviço responsável por coordenar transações distribuídas do fluxo de 
 - Completed
 - Compensating
 - Failed
+
+## CI (GitHub Actions)
+
+O pipeline de CI está definido em `/home/runner/work/car-repair-saga-orchestrator/car-repair-saga-orchestrator/.github/workflows/ci.yml`.
+
+Secrets obrigatórios para análise SonarCloud:
+
+- `SONAR_TOKEN`
+- `SONAR_PROJECT_KEY`
+- `SONAR_ORGANIZATION`
