@@ -50,7 +50,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Install SonarScanner and ReportGenerator
+      - name: Install ReportGenerator
         run: |
           dotnet tool install --global dotnet-reportgenerator-globaltool
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
@@ -129,7 +129,7 @@ jobs:
           PY
 
       - name: End SonarCloud analysis (quality gate)
-        if: ${{ always() && steps.sonar_begin.outcome == 'success' }}
+        if: ${{ success() && steps.sonar_begin.outcome == 'success' }}
         run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: Docker build validation
