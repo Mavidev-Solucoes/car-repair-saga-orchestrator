@@ -104,47 +104,29 @@ jobs:
       - name: Enforce coverage threshold (80%)
         run: |
           python - <<'PY'
-          import glob
+          import pathlib
           import xml.etree.ElementTree as ET
           import os
           import sys
 
           threshold = float(os.environ["COVERAGE_THRESHOLD"])
-          reports = glob.glob("TestResults/**/coverage.cobertura.xml", recursive=True)
-          if not reports:
-              print("Coverage reports were not generated.")
+          aggregated_report = pathlib.Path("TestResults/CoverageReport/Cobertura.xml")
+          if not aggregated_report.exists():
+              print("Aggregated coverage report was not generated.")
               sys.exit(1)
 
-          covered = 0
-          valid = 0
-          for report in reports:
-              root = ET.parse(report).getroot()
-              lines_covered = root.attrib.get("lines-covered")
-              lines_valid = root.attrib.get("lines-valid")
-              if lines_covered is None or lines_valid is None:
-                  continue
-              covered += int(lines_covered)
-              valid += int(lines_valid)
-
-          if valid == 0:
-              print("Could not read valid line totals from coverage reports.")
+          root = ET.parse(aggregated_report).getroot()
+          line_rate = root.attrib.get("line-rate")
+          if line_rate is None:
+              print("Could not read line-rate from aggregated coverage report.")
               sys.exit(1)
 
-          coverage = (covered / valid) * 100.0
+          coverage = float(line_rate) * 100.0
           print(f"Line coverage: {coverage:.2f}%")
           if coverage < threshold:
               print(f"Coverage threshold not met. Required: {threshold:.2f}%, Actual: {coverage:.2f}%")
               sys.exit(1)
           PY
-
-      - name: End SonarCloud analysis (quality gate)
-        if: ${{ always() && steps.sonar_begin.outcome == 'success' }}
-        run: |
-          if [ "${{ job.status }}" = "failure" ]; then
-            dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN" || true
-          else
-            dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
-          fi
 
       - name: Docker build validation
         run: |
@@ -162,4 +144,13 @@ jobs:
             docker logs "$container_id"
             echo "Container failed to start."
             exit 1
+          fi
+
+      - name: End SonarCloud analysis (quality gate)
+        if: ${{ always() && steps.sonar_begin.outcome == 'success' }}
+        run: |
+          if [ "${{ job.status }}" = "failure" ]; then
+            dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN" || true
+          else
+            dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
           fi
