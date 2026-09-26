@@ -1,7 +1,8 @@
 using System.Text;
 using System.Text.Json;
-using Application.SagaOrchestration.Abstractions;
+using Application.SagaOrchestration.Commands;
 using Application.SagaOrchestration.Messages;
+using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -38,7 +39,10 @@ public sealed class RabbitMqDomainEventConsumer(
         _channel = _connection.CreateModel();
         _channel.ExchangeDeclare(_options.DomainEventsExchange, ExchangeType.Topic, durable: true, autoDelete: false);
         _channel.QueueDeclare(_options.DomainEventsQueue, durable: true, exclusive: false, autoDelete: false);
-        _channel.QueueBind(_options.DomainEventsQueue, _options.DomainEventsExchange, routingKey: "#");
+        foreach (var routingKey in _options.DomainEventRoutingKeys.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            _channel.QueueBind(_options.DomainEventsQueue, _options.DomainEventsExchange, routingKey);
+        }
         _channel.BasicQos(prefetchSize: 0, prefetchCount: 10, global: false);
 
         var consumer = new AsyncEventingBasicConsumer(_channel);
@@ -74,8 +78,8 @@ public sealed class RabbitMqDomainEventConsumer(
             }
 
             using var scope = scopeFactory.CreateScope();
-            var coordinator = scope.ServiceProvider.GetRequiredService<ISagaCoordinator>();
-            await coordinator.HandleEventAsync(domainEvent, _stoppingToken);
+            var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+            await mediator.Send(new ProcessSagaEventCommand(domainEvent), _stoppingToken);
 
             _channel.BasicAck(args.DeliveryTag, multiple: false);
         }

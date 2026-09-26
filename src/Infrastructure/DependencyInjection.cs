@@ -1,4 +1,5 @@
 using Application.SagaOrchestration.Abstractions;
+using Infrastructure.HealthChecks;
 using Infrastructure.Messaging.RabbitMq;
 using Infrastructure.Persistence;
 using Microsoft.Extensions.Configuration;
@@ -19,9 +20,13 @@ public static class DependencyInjection
             options.UseNpgsql(configuration.GetConnectionString("PostgreSql")));
 
         services.AddScoped<ISagaRepository, SagaRepository>();
+        services.AddScoped<ISagaReadRepository, SagaReadRepository>();
         services.AddSingleton<ICommandDispatcher, RabbitMqCommandDispatcher>();
         services.AddHostedService<RabbitMqDomainEventConsumer>();
         services.AddHostedService<DatabaseInitializationHostedService>();
+        services.AddHealthChecks()
+            .AddCheck<DatabaseHealthCheck>("postgresql")
+            .AddCheck<RabbitMqHealthCheck>("rabbitmq");
 
         return services;
     }
