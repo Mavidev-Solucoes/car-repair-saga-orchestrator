@@ -1,3 +1,4 @@
+using FluentValidation;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 
@@ -14,23 +15,44 @@ public sealed class GlobalExceptionHandler(
     {
         logger.LogError(exception, "Unhandled exception occurred.");
 
-        httpContext.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        var (statusCode, title, errors) = exception switch
+        {
+            ValidationException validationException =>
+                (StatusCodes.Status400BadRequest,
+                    "One or more validation errors occurred.",
+                    validationException.Errors
+                        .GroupBy(error => error.PropertyName)
+                        .ToDictionary(group => group.Key, group => group.Select(error => error.ErrorMessage).ToArray())),
+            _ =>
+                (StatusCodes.Status500InternalServerError,
+                    "An unexpected error occurred.",
+                    (IDictionary<string, string[]>?)null)
+        };
+
+        httpContext.Response.StatusCode = statusCode;
+
+        var problemDetails = new ProblemDetails
+        {
+            Status = statusCode,
+            Title = title,
+            Type = $"https://httpstatuses.com/{statusCode}"
+        };
+
+        if (errors is not null)
+        {
+            problemDetails.Extensions["errors"] = errors;
+        }
 
         var handled = await problemDetailsService.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = httpContext,
             Exception = exception,
-            ProblemDetails = new ProblemDetails
-            {
-                Status = StatusCodes.Status500InternalServerError,
-                Title = "An unexpected error occurred.",
-                Type = "https://httpstatuses.com/500"
-            }
+            ProblemDetails = problemDetails
         });
 
         if (!handled)
         {
-            await httpContext.Response.WriteAsync("An unexpected error occurred.", cancellationToken);
+            await httpContext.Response.WriteAsync(title, cancellationToken);
         }
 
         return true;
