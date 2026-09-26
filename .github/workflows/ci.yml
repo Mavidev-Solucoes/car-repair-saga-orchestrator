@@ -57,7 +57,7 @@ jobs:
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       - name: Restore
-        run: dotnet restore /home/runner/work/car-repair-saga-orchestrator/car-repair-saga-orchestrator/CarRepairSagaOrchestrator.sln
+        run: dotnet restore CarRepairSagaOrchestrator.sln
 
       - name: Begin SonarCloud analysis
         run: |
@@ -71,11 +71,11 @@ jobs:
             /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml"
 
       - name: Build
-        run: dotnet build /home/runner/work/car-repair-saga-orchestrator/car-repair-saga-orchestrator/CarRepairSagaOrchestrator.sln --configuration $BUILD_CONFIGURATION --no-restore
+        run: dotnet build CarRepairSagaOrchestrator.sln --configuration $BUILD_CONFIGURATION --no-restore
 
       - name: Unit tests with coverage
         run: |
-          dotnet test /home/runner/work/car-repair-saga-orchestrator/car-repair-saga-orchestrator/CarRepairSagaOrchestrator.sln \
+          dotnet test CarRepairSagaOrchestrator.sln \
             --configuration $BUILD_CONFIGURATION \
             --no-build \
             --collect:"XPlat Code Coverage;Format=opencover,cobertura" \
@@ -95,8 +95,9 @@ jobs:
           import pathlib
           import sys
           import xml.etree.ElementTree as ET
+          import os
 
-          threshold = 80.0
+          threshold = float(os.environ["COVERAGE_THRESHOLD"])
           summary = pathlib.Path("TestResults/CoverageReport/Summary.xml")
           if not summary.exists():
               print("Coverage summary file was not generated.")
@@ -121,6 +122,6 @@ jobs:
       - name: Docker build validation
         run: |
           docker build \
-            --file /home/runner/work/car-repair-saga-orchestrator/car-repair-saga-orchestrator/src/Api/Dockerfile \
+            --file src/Api/Dockerfile \
             --tag car-repair-saga-orchestrator:ci-validation \
-            /home/runner/work/car-repair-saga-orchestrator/car-repair-saga-orchestrator
+            .
