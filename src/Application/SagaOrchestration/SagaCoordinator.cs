@@ -142,10 +142,10 @@ public sealed class SagaCoordinator(
     {
         return failedState switch
         {
-            SagaState.WaitingProduction => ["RevertProduction", "RefundPayment", "CancelBudget"],
-            SagaState.WaitingPayment => ["RefundPayment", "CancelBudget"],
-            SagaState.WaitingBudgetApproval => ["CancelBudget"],
-            SagaState.WaitingBudget => ["CancelBudgetRequest"],
+            SagaState.WaitingProduction => ["RefundPayment", "RevertBudgetApproval", "CancelBudgetRequest"],
+            SagaState.WaitingPayment => ["RevertBudgetApproval", "CancelBudgetRequest"],
+            SagaState.WaitingBudgetApproval => ["CancelBudgetRequest"],
+            SagaState.WaitingBudget => ["CancelRepairOrder"],
             _ => ["CancelRepairOrder"]
         };
     }

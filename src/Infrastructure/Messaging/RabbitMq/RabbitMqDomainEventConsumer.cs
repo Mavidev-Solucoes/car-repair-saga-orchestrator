@@ -82,7 +82,7 @@ public sealed class RabbitMqDomainEventConsumer(
         catch (Exception exception)
         {
             logger.LogError(exception, "Error processing domain event message.");
-            _channel.BasicNack(args.DeliveryTag, multiple: false, requeue: false);
+            _channel.BasicNack(args.DeliveryTag, multiple: false, requeue: true);
         }
     }
 
