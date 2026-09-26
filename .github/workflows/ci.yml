@@ -80,7 +80,7 @@ jobs:
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
-            /d:sonar.cs.opencover.reportsPaths="TestResults/CoverageReport/OpenCover.xml"
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml"
 
       - name: Build
         run: dotnet build CarRepairSagaOrchestrator.sln --configuration $BUILD_CONFIGURATION --no-restore
@@ -90,16 +90,16 @@ jobs:
           dotnet test CarRepairSagaOrchestrator.sln \
             --configuration $BUILD_CONFIGURATION \
             --no-build \
-            --collect:"XPlat Code Coverage;Format=cobertura" \
+            --collect:"XPlat Code Coverage;Format=opencover" \
             --logger "trx;LogFileName=test-results.trx" \
             --results-directory TestResults
 
       - name: Generate coverage report
         run: |
           reportgenerator \
-            -reports:"TestResults/**/coverage.cobertura.xml" \
+            -reports:"TestResults/**/coverage.opencover.xml" \
             -targetdir:"TestResults/CoverageReport" \
-            -reporttypes:"HtmlInline_AzurePipelines;Cobertura;XmlSummary;OpenCover"
+            -reporttypes:"HtmlInline_AzurePipelines;Cobertura;XmlSummary"
 
       - name: Enforce coverage threshold (80%)
         run: |
@@ -145,6 +145,7 @@ jobs:
             echo "Container failed to start."
             exit 1
           fi
+          curl --fail --silent --show-error --location --max-time 10 http://localhost:18080/health > /dev/null
 
       - name: End SonarCloud analysis (quality gate)
         if: ${{ always() && steps.sonar_begin.outcome == 'success' }}
