@@ -21,6 +21,10 @@ jobs:
       DOTNET_VERSION: 8.0.x
       BUILD_CONFIGURATION: Release
       COVERAGE_THRESHOLD: "80"
+      REPORTGENERATOR_VERSION: 5.5.11
+      SONARSCANNER_VERSION: 11.3.0
+      CONTAINER_HEALTH_PORT: "18080"
+      CONTAINER_HEALTH_ENDPOINT: "/health"
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
       SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
       SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
@@ -52,7 +56,7 @@ jobs:
 
       - name: Install ReportGenerator
         run: |
-          dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.11
+          dotnet tool install --global dotnet-reportgenerator-globaltool --version "$REPORTGENERATOR_VERSION"
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       - name: Validate SonarCloud secrets
@@ -64,7 +68,7 @@ jobs:
 
       - name: Install SonarScanner
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-        run: dotnet tool install --global dotnet-sonarscanner --version 11.3.0
+        run: dotnet tool install --global dotnet-sonarscanner --version "$SONARSCANNER_VERSION"
 
       - name: Restore
         run: dotnet restore CarRepairSagaOrchestrator.sln
@@ -137,15 +141,22 @@ jobs:
 
       - name: Docker startup validation
         run: |
-          container_id="$(docker run -d -p 18080:8080 car-repair-saga-orchestrator:ci-validation)"
+          container_id="$(docker run -d -p "$CONTAINER_HEALTH_PORT:8080" car-repair-saga-orchestrator:ci-validation)"
           trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
-          sleep 10
-          if [ "$(docker inspect -f '{{.State.Running}}' "$container_id")" != "true" ]; then
-            docker logs "$container_id"
-            echo "Container failed to start."
-            exit 1
-          fi
-          curl --fail --silent --show-error --location --max-time 10 http://localhost:18080/health > /dev/null
+          for _ in $(seq 1 30); do
+            if [ "$(docker inspect -f '{{.State.Running}}' "$container_id")" != "true" ]; then
+              docker logs "$container_id"
+              echo "Container failed to stay running."
+              exit 1
+            fi
+            if curl --fail --silent --show-error --location --max-time 5 "http://localhost:$CONTAINER_HEALTH_PORT$CONTAINER_HEALTH_ENDPOINT" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container_id"
+          echo "Container health endpoint did not become ready in time."
+          exit 1
 
       - name: End SonarCloud analysis (quality gate)
         if: ${{ always() && steps.sonar_begin.outcome == 'success' }}
