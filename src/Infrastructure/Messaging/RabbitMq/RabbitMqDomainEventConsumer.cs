@@ -17,11 +17,14 @@ public sealed class RabbitMqDomainEventConsumer(
     ILogger<RabbitMqDomainEventConsumer> logger) : BackgroundService
 {
     private readonly RabbitMqOptions _options = options.Value;
+    private CancellationToken _stoppingToken;
     private IConnection? _connection;
     private IModel? _channel;
 
     protected override Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        _stoppingToken = stoppingToken;
+
         var factory = new ConnectionFactory
         {
             HostName = _options.HostName,
@@ -72,7 +75,7 @@ public sealed class RabbitMqDomainEventConsumer(
 
             using var scope = scopeFactory.CreateScope();
             var coordinator = scope.ServiceProvider.GetRequiredService<ISagaCoordinator>();
-            await coordinator.HandleEventAsync(domainEvent, CancellationToken.None);
+            await coordinator.HandleEventAsync(domainEvent, _stoppingToken);
 
             _channel.BasicAck(args.DeliveryTag, multiple: false);
         }

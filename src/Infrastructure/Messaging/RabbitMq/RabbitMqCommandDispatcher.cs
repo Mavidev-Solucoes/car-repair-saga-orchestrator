@@ -7,39 +7,61 @@ using RabbitMQ.Client;
 
 namespace Infrastructure.Messaging.RabbitMq;
 
-public sealed class RabbitMqCommandDispatcher(IOptions<RabbitMqOptions> options) : ICommandDispatcher
+public sealed class RabbitMqCommandDispatcher : ICommandDispatcher, IDisposable
 {
-    private readonly RabbitMqOptions _options = options.Value;
+    private readonly RabbitMqOptions _options;
+    private readonly object _channelLock = new();
+    private readonly IConnection _connection;
+    private readonly IModel _channel;
+
+    public RabbitMqCommandDispatcher(IOptions<RabbitMqOptions> options)
+    {
+        _options = options.Value;
+        _connection = CreateConnection(_options);
+        _channel = _connection.CreateModel();
+        _channel.ExchangeDeclare(_options.CommandsExchange, ExchangeType.Topic, durable: true, autoDelete: false);
+    }
 
     public Task DispatchAsync(CommandMessage command, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var factory = new ConnectionFactory
-        {
-            HostName = _options.HostName,
-            Port = _options.Port,
-            UserName = _options.UserName,
-            Password = _options.Password,
-            VirtualHost = _options.VirtualHost
-        };
-
-        using var connection = factory.CreateConnection();
-        using var channel = connection.CreateModel();
-        channel.ExchangeDeclare(_options.CommandsExchange, ExchangeType.Topic, durable: true, autoDelete: false);
-
         var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(command));
-        var properties = channel.CreateBasicProperties();
-        properties.Persistent = true;
-        properties.ContentType = "application/json";
 
-        channel.BasicPublish(
-            exchange: _options.CommandsExchange,
-            routingKey: command.CommandType,
-            mandatory: false,
-            basicProperties: properties,
-            body: body);
+        lock (_channelLock)
+        {
+            var properties = _channel.CreateBasicProperties();
+            properties.Persistent = true;
+            properties.ContentType = "application/json";
+
+            _channel.BasicPublish(
+                exchange: _options.CommandsExchange,
+                routingKey: command.CommandType,
+                mandatory: false,
+                basicProperties: properties,
+                body: body);
+        }
 
         return Task.CompletedTask;
+    }
+
+    public void Dispose()
+    {
+        _channel.Dispose();
+        _connection.Dispose();
+    }
+
+    private static IConnection CreateConnection(RabbitMqOptions options)
+    {
+        var factory = new ConnectionFactory
+        {
+            HostName = options.HostName,
+            Port = options.Port,
+            UserName = options.UserName,
+            Password = options.Password,
+            VirtualHost = options.VirtualHost
+        };
+
+        return factory.CreateConnection();
     }
 }

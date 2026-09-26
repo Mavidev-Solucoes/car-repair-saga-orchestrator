@@ -10,6 +10,8 @@ public sealed class SagaCoordinator(
     ICommandDispatcher commandDispatcher,
     ILogger<SagaCoordinator> logger) : ISagaCoordinator
 {
+    private const string SagaStartEvent = "RepairOrderCreated";
+
     private static readonly Dictionary<string, TransitionDefinition> ForwardTransitions =
         new(StringComparer.OrdinalIgnoreCase)
         {
@@ -39,8 +41,16 @@ public sealed class SagaCoordinator(
 
         if (saga is null)
         {
+            if (!domainEvent.EventType.Equals(SagaStartEvent, StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogWarning(
+                    "Ignoring event {EventType} because saga for correlation {CorrelationId} does not exist yet.",
+                    domainEvent.EventType,
+                    domainEvent.CorrelationId);
+                return;
+            }
+
             saga = new SagaInstance(domainEvent.CorrelationId);
-            saga.TransitionTo(SagaState.Started, "SagaInitialized", domainEvent.EventType, domainEvent.OccurredAtUtc);
             await sagaRepository.AddAsync(saga, cancellationToken);
         }
 

@@ -10,6 +10,14 @@ public sealed class DatabaseInitializationHostedService(IServiceScopeFactory sco
     {
         using var scope = scopeFactory.CreateScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<SagaDbContext>();
+
+        var hasMigrations = dbContext.Database.GetMigrations().Any();
+        if (hasMigrations)
+        {
+            await dbContext.Database.MigrateAsync(cancellationToken);
+            return;
+        }
+
         await dbContext.Database.EnsureCreatedAsync(cancellationToken);
     }
 
