@@ -52,14 +52,26 @@ jobs:
 
       - name: Install SonarScanner and ReportGenerator
         run: |
-          dotnet tool update --global dotnet-sonarscanner
-          dotnet tool update --global dotnet-reportgenerator-globaltool
+          dotnet tool install --global dotnet-reportgenerator-globaltool
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Validate SonarCloud secrets
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        run: |
+          test -n "$SONAR_TOKEN" || (echo "Missing SONAR_TOKEN secret" && exit 1)
+          test -n "$SONAR_PROJECT_KEY" || (echo "Missing SONAR_PROJECT_KEY secret" && exit 1)
+          test -n "$SONAR_ORGANIZATION" || (echo "Missing SONAR_ORGANIZATION secret" && exit 1)
+
+      - name: Install SonarScanner
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        run: dotnet tool install --global dotnet-sonarscanner
 
       - name: Restore
         run: dotnet restore CarRepairSagaOrchestrator.sln
 
       - name: Begin SonarCloud analysis
+        id: sonar_begin
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
         run: |
           dotnet sonarscanner begin \
             /k:"$SONAR_PROJECT_KEY" \
@@ -117,7 +129,7 @@ jobs:
           PY
 
       - name: End SonarCloud analysis (quality gate)
-        if: ${{ always() }}
+        if: ${{ always() && steps.sonar_begin.outcome == 'success' }}
         run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: Docker build validation
