@@ -109,7 +109,18 @@ public sealed class SagaCoordinator(
         }
 
         var failedState = saga.CurrentState;
-        saga.TransitionTo(SagaState.Compensating, domainEvent.EventType, domainEvent.Payload, domainEvent.OccurredAtUtc);
+        if (saga.CurrentState != SagaState.Compensating)
+        {
+            saga.TransitionTo(SagaState.Compensating, domainEvent.EventType, domainEvent.Payload, domainEvent.OccurredAtUtc);
+            await sagaRepository.SaveChangesAsync(cancellationToken);
+        }
+        else
+        {
+            failedState = saga.History
+                .OrderByDescending(entry => entry.OccurredAtUtc)
+                .FirstOrDefault(entry => entry.ToState == SagaState.Compensating)?
+                .FromState ?? SagaState.Started;
+        }
 
         foreach (var command in BuildCompensationCommands(failedState))
         {
@@ -123,7 +134,7 @@ public sealed class SagaCoordinator(
                 cancellationToken);
         }
 
-        saga.TransitionTo(SagaState.Failed, "CompensationTriggered", domainEvent.Payload, DateTime.UtcNow);
+        saga.TransitionTo(SagaState.Failed, "CompensationTriggered", domainEvent.Payload, domainEvent.OccurredAtUtc);
         await sagaRepository.SaveChangesAsync(cancellationToken);
     }
 

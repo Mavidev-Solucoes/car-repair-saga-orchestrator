@@ -49,7 +49,7 @@ public sealed class RabbitMqDomainEventConsumer(
             autoAck: false,
             consumer: consumer);
 
-        return Task.CompletedTask;
+        return WaitUntilStoppedAsync(stoppingToken);
     }
 
     private async Task HandleReceivedAsync(object sender, BasicDeliverEventArgs args)
@@ -91,5 +91,16 @@ public sealed class RabbitMqDomainEventConsumer(
         _channel?.Dispose();
         _connection?.Dispose();
         base.Dispose();
+    }
+
+    private static async Task WaitUntilStoppedAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, stoppingToken);
+        }
+        catch (OperationCanceledException)
+        {
+        }
     }
 }
