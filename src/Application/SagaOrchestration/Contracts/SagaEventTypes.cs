@@ -1,5 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Application.SagaOrchestration.Contracts;
 
+[ExcludeFromCodeCoverage]
 public static class SagaEventTypes
 {
     public const string ServiceOrderOpened = "ServiceOrderOpened";

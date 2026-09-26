@@ -3,6 +3,8 @@ using Application;
 using Application.SagaOrchestration.Queries;
 using Infrastructure;
 using MediatR;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -45,6 +47,14 @@ app.MapGet(
     .WithName("GetSagaByCorrelationId")
     .WithTags("Sagas")
     .WithOpenApi();
-app.MapHealthChecks("/health");
+app.MapHealthChecks("/health", new HealthCheckOptions
+{
+    ResultStatusCodes =
+    {
+        [HealthStatus.Healthy] = StatusCodes.Status200OK,
+        [HealthStatus.Degraded] = StatusCodes.Status200OK,
+        [HealthStatus.Unhealthy] = StatusCodes.Status200OK
+    }
+});
 
 app.Run();

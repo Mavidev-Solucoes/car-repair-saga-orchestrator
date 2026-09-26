@@ -22,10 +22,33 @@ public sealed class RabbitMqDomainEventConsumer(
     private IConnection? _connection;
     private IModel? _channel;
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stoppingToken = stoppingToken;
 
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                StartConsumer();
+                await WaitUntilStoppedAsync(stoppingToken);
+                return;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "RabbitMQ connection is unavailable. Retrying in 5 seconds.");
+                DisposeChannelAndConnection();
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            }
+        }
+    }
+
+    private void StartConsumer()
+    {
         var factory = new ConnectionFactory
         {
             HostName = _options.HostName,
@@ -53,7 +76,6 @@ public sealed class RabbitMqDomainEventConsumer(
             autoAck: false,
             consumer: consumer);
 
-        return WaitUntilStoppedAsync(stoppingToken);
     }
 
     private async Task HandleReceivedAsync(object sender, BasicDeliverEventArgs args)
@@ -92,9 +114,16 @@ public sealed class RabbitMqDomainEventConsumer(
 
     public override void Dispose()
     {
+        DisposeChannelAndConnection();
+        base.Dispose();
+    }
+
+    private void DisposeChannelAndConnection()
+    {
         _channel?.Dispose();
         _connection?.Dispose();
-        base.Dispose();
+        _channel = null;
+        _connection = null;
     }
 
     private static async Task WaitUntilStoppedAsync(CancellationToken stoppingToken)

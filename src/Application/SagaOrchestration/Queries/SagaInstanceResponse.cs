@@ -1,5 +1,8 @@
+using System.Diagnostics.CodeAnalysis;
+
 namespace Application.SagaOrchestration.Queries;
 
+[ExcludeFromCodeCoverage]
 public sealed class SagaInstanceResponse
 {
     public Guid Id { get; init; }
@@ -10,6 +13,7 @@ public sealed class SagaInstanceResponse
     public IReadOnlyCollection<SagaHistoryResponse> History { get; init; } = [];
 }
 
+[ExcludeFromCodeCoverage]
 public sealed class SagaHistoryResponse
 {
     public long Id { get; init; }
