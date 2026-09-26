@@ -1,4 +1,6 @@
 using Application.Common.Behaviors;
+using Application.SagaOrchestration;
+using Application.SagaOrchestration.Abstractions;
 using FluentValidation;
 using MediatR;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +21,7 @@ public static class DependencyInjection
             config.RegisterServicesFromAssembly(assembly);
             config.AddOpenBehavior(typeof(ValidationBehavior<,>));
         });
+        services.AddScoped<ISagaCoordinator, SagaCoordinator>();
 
         return services;
     }
