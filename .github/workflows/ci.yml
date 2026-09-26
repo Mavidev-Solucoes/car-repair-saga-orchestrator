@@ -104,24 +104,33 @@ jobs:
       - name: Enforce coverage threshold (80%)
         run: |
           python - <<'PY'
-          import pathlib
-          import sys
+          import glob
           import xml.etree.ElementTree as ET
           import os
+          import sys
 
           threshold = float(os.environ["COVERAGE_THRESHOLD"])
-          summary = pathlib.Path("TestResults/CoverageReport/Summary.xml")
-          if not summary.exists():
-              print("Coverage summary file was not generated.")
+          reports = glob.glob("TestResults/**/coverage.cobertura.xml", recursive=True)
+          if not reports:
+              print("Coverage reports were not generated.")
               sys.exit(1)
 
-          root = ET.parse(summary).getroot()
-          linecoverage = root.attrib.get("linecoverage")
-          if linecoverage is None:
-              print("Could not read line coverage from Summary.xml.")
+          covered = 0
+          valid = 0
+          for report in reports:
+              root = ET.parse(report).getroot()
+              lines_covered = root.attrib.get("lines-covered")
+              lines_valid = root.attrib.get("lines-valid")
+              if lines_covered is None or lines_valid is None:
+                  continue
+              covered += int(lines_covered)
+              valid += int(lines_valid)
+
+          if valid == 0:
+              print("Could not read valid line totals from coverage reports.")
               sys.exit(1)
 
-          coverage = float(linecoverage)
+          coverage = (covered / valid) * 100.0
           print(f"Line coverage: {coverage:.2f}%")
           if coverage < threshold:
               print(f"Coverage threshold not met. Required: {threshold:.2f}%, Actual: {coverage:.2f}%")
@@ -143,3 +152,14 @@ jobs:
             --file src/Api/Dockerfile \
             --tag car-repair-saga-orchestrator:ci-validation \
             .
+
+      - name: Docker startup validation
+        run: |
+          container_id="$(docker run -d -p 18080:8080 car-repair-saga-orchestrator:ci-validation)"
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          sleep 10
+          if [ "$(docker inspect -f '{{.State.Running}}' "$container_id")" != "true" ]; then
+            docker logs "$container_id"
+            echo "Container failed to start."
+            exit 1
+          fi
