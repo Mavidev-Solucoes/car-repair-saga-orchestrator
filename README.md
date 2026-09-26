@@ -29,3 +29,16 @@ Secrets obrigatórios para análise SonarCloud:
 - `SONAR_TOKEN`
 - `SONAR_PROJECT_KEY`
 - `SONAR_ORGANIZATION`
+
+## CD (GitHub Actions)
+
+O pipeline de CD está definido em `.github/workflows/cd.yml` e roda somente após sucesso do workflow de CI na branch `main`.
+
+Imagem publicada no GitHub Container Registry (`ghcr.io/${owner}/${repo}`) com as tags:
+
+- `latest`
+- `<commit-sha>`
+
+Secrets obrigatórios para CD:
+
+- Nenhum secret adicional. O workflow usa `GITHUB_TOKEN` automático do GitHub Actions com permissão `packages: write`.
