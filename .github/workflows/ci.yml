@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+      - develop
+
+permissions:
+  contents: read
+
+jobs:
+  ci:
+    name: Restore, Build, Test, Coverage, Sonar and Docker Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_VERSION: 8.0.x
+      BUILD_CONFIGURATION: Release
+      COVERAGE_THRESHOLD: "80"
+      REPORTGENERATOR_VERSION: 5.5.11
+      SONARSCANNER_VERSION: 11.3.0
+      CONTAINER_HEALTH_PORT: "18080"
+      CONTAINER_HEALTH_ENDPOINT: "/health"
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      SONAR_PROJECT_KEY: ${{ secrets.SONAR_PROJECT_KEY }}
+      SONAR_ORGANIZATION: ${{ secrets.SONAR_ORGANIZATION }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Java (SonarScanner requirement)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Install ReportGenerator
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool --version "$REPORTGENERATOR_VERSION"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Validate SonarCloud secrets
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        run: |
+          test -n "$SONAR_TOKEN" || (echo "Missing SONAR_TOKEN secret" && exit 1)
+          test -n "$SONAR_PROJECT_KEY" || (echo "Missing SONAR_PROJECT_KEY secret" && exit 1)
+          test -n "$SONAR_ORGANIZATION" || (echo "Missing SONAR_ORGANIZATION secret" && exit 1)
+
+      - name: Install SonarScanner
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        run: dotnet tool install --global dotnet-sonarscanner --version "$SONARSCANNER_VERSION"
+
+      - name: Restore
+        run: dotnet restore CarRepairSagaOrchestrator.sln
+
+      - name: Begin SonarCloud analysis
+        id: sonar_begin
+        if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
+        run: |
+          dotnet sonarscanner begin \
+            /k:"$SONAR_PROJECT_KEY" \
+            /o:"$SONAR_ORGANIZATION" \
+            /d:sonar.host.url="https://sonarcloud.io" \
+            /d:sonar.token="$SONAR_TOKEN" \
+            /d:sonar.qualitygate.wait=true \
+            /d:sonar.qualitygate.timeout=300 \
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml"
+
+      - name: Build
+        run: dotnet build CarRepairSagaOrchestrator.sln --configuration $BUILD_CONFIGURATION --no-restore
+
+      - name: Unit tests with coverage
+        run: |
+          dotnet test CarRepairSagaOrchestrator.sln \
+            --configuration $BUILD_CONFIGURATION \
+            --no-build \
+            --collect:"XPlat Code Coverage;Format=opencover" \
+            --logger "trx;LogFileName=test-results.trx" \
+            --results-directory TestResults
+
+      - name: Generate coverage report
+        run: |
+          reportgenerator \
+            -reports:"TestResults/**/coverage.opencover.xml" \
+            -targetdir:"TestResults/CoverageReport" \
+            -reporttypes:"HtmlInline_AzurePipelines;Cobertura;XmlSummary"
+
+      - name: Enforce coverage threshold (80%)
+        run: |
+          python - <<'PY'
+          import pathlib
+          import xml.etree.ElementTree as ET
+          import os
+          import sys
+
+          threshold = float(os.environ["COVERAGE_THRESHOLD"])
+          aggregated_report = pathlib.Path("TestResults/CoverageReport/Cobertura.xml")
+          if not aggregated_report.exists():
+              print("Aggregated coverage report was not generated.")
+              sys.exit(1)
+
+          root = ET.parse(aggregated_report).getroot()
+          line_rate = root.attrib.get("line-rate")
+          if line_rate is None:
+              print("Could not read line-rate from aggregated coverage report.")
+              sys.exit(1)
+
+          coverage = float(line_rate) * 100.0
+          print(f"Line coverage: {coverage:.2f}%")
+          if coverage < threshold:
+              print(f"Coverage threshold not met. Required: {threshold:.2f}%, Actual: {coverage:.2f}%")
+              sys.exit(1)
+          PY
+
+      - name: Docker build validation
+        run: |
+          docker build \
+            --file src/Api/Dockerfile \
+            --tag car-repair-saga-orchestrator:ci-validation \
+            .
+
+      - name: Docker startup validation
+        run: |
+          container_id="$(docker run -d -p "$CONTAINER_HEALTH_PORT:8080" car-repair-saga-orchestrator:ci-validation)"
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true' EXIT
+          for _ in $(seq 1 30); do
+            if [ "$(docker inspect -f '{{.State.Running}}' "$container_id")" != "true" ]; then
+              docker logs "$container_id"
+              echo "Container failed to stay running."
+              exit 1
+            fi
+            if curl --fail --silent --show-error --location --max-time 5 "http://localhost:$CONTAINER_HEALTH_PORT$CONTAINER_HEALTH_ENDPOINT" > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "$container_id"
+          echo "Container health endpoint did not become ready in time."
+          exit 1
+
+      - name: End SonarCloud analysis (quality gate)
+        if: ${{ always() && steps.sonar_begin.outcome == 'success' }}
+        run: |
+          if [ "${{ job.status }}" = "failure" ]; then
+            dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN" || true
+          else
+            dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+          fi
