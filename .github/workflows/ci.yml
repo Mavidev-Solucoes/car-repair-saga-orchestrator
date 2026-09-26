@@ -52,7 +52,7 @@ jobs:
 
       - name: Install ReportGenerator
         run: |
-          dotnet tool install --global dotnet-reportgenerator-globaltool
+          dotnet tool install --global dotnet-reportgenerator-globaltool --version 5.5.11
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
 
       - name: Validate SonarCloud secrets
@@ -64,7 +64,7 @@ jobs:
 
       - name: Install SonarScanner
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.fork == false
-        run: dotnet tool install --global dotnet-sonarscanner
+        run: dotnet tool install --global dotnet-sonarscanner --version 11.3.0
 
       - name: Restore
         run: dotnet restore CarRepairSagaOrchestrator.sln
@@ -130,6 +130,11 @@ jobs:
 
       - name: End SonarCloud analysis (quality gate)
         if: ${{ success() && steps.sonar_begin.outcome == 'success' }}
+        run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
+
+      - name: End SonarCloud analysis after failed stages
+        if: ${{ failure() && steps.sonar_begin.outcome == 'success' }}
+        continue-on-error: true
         run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: Docker build validation
