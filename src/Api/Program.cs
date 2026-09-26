@@ -20,13 +20,15 @@ if (app.Environment.IsDevelopment())
     app.UseSwagger();
     app.UseSwaggerUI();
 }
-else
+
+app.UseExceptionHandler();
+app.UseHttpsRedirection();
+
+if (!app.Environment.IsDevelopment())
 {
     app.UseHsts();
 }
 
-app.UseExceptionHandler();
-app.UseHttpsRedirection();
 app.UseAuthorization();
 
 app.MapControllers();
