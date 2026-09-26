@@ -117,6 +117,7 @@ jobs:
           PY
 
       - name: End SonarCloud analysis (quality gate)
+        if: ${{ always() }}
         run: dotnet sonarscanner end /d:sonar.token="$SONAR_TOKEN"
 
       - name: Docker build validation
