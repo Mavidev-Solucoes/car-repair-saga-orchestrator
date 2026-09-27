@@ -68,7 +68,7 @@ public sealed class SagaCoordinatorTests
     [Theory]
     [InlineData(SagaEventTypes.BudgetRejected, new[] { SagaCommandTypes.CancelServiceOrderCommand })]
     [InlineData(SagaEventTypes.PaymentRejected, new[] { SagaCommandTypes.CancelBudgetCommand, SagaCommandTypes.CancelServiceOrderCommand })]
-    [InlineData(SagaEventTypes.WorkFailed, new[] { SagaCommandTypes.CompensateWorkOrderCommand, SagaCommandTypes.ReturnServiceOrderToApprovedCommand })]
+    [InlineData(SagaEventTypes.WorkFailed, new[] { SagaCommandTypes.CancelBudgetCommand, SagaCommandTypes.CancelServiceOrderCommand })]
     public async Task HandleEventAsync_ShouldTriggerCompensation(string eventType, string[] expectedCommands)
     {
         var repository = new InMemorySagaRepository();
@@ -124,6 +124,45 @@ public sealed class SagaCoordinatorTests
 
         Assert.Empty(repository.Items);
         Assert.Empty(dispatcher.Commands);
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldIgnoreEventsWithoutEventType()
+    {
+        var repository = new InMemorySagaRepository();
+        var dispatcher = new RecordingCommandDispatcher();
+        var coordinator = CreateCoordinator(repository, dispatcher);
+
+        await coordinator.HandleEventAsync(new DomainEventMessage
+        {
+            CorrelationId = "SO-001",
+            EventType = string.Empty
+        }, CancellationToken.None);
+
+        Assert.Empty(repository.Items);
+        Assert.Empty(dispatcher.Commands);
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldCompleteCompensationWhenSagaAlreadyCompensating()
+    {
+        var repository = new InMemorySagaRepository();
+        var dispatcher = new RecordingCommandDispatcher();
+        var coordinator = CreateCoordinator(repository, dispatcher);
+        var saga = new SagaInstance("SO-001");
+        saga.TransitionTo(SagaState.WaitingBudget, SagaEventTypes.ServiceOrderOpened);
+        saga.TransitionTo(SagaState.WaitingBudgetApproval, SagaEventTypes.BudgetCreated);
+        saga.TransitionTo(SagaState.WaitingPayment, SagaEventTypes.BudgetApproved);
+        saga.TransitionTo(SagaState.WaitingProduction, SagaEventTypes.PaymentApproved);
+        saga.TransitionTo(SagaState.Compensating, SagaEventTypes.WorkFailed);
+        repository.Items[saga.CorrelationId] = saga;
+
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.WorkFailed), CancellationToken.None);
+
+        Assert.Equal(SagaState.Failed, saga.CurrentState);
+        Assert.Equal(
+            [SagaCommandTypes.CancelBudgetCommand, SagaCommandTypes.CancelServiceOrderCommand],
+            dispatcher.Commands.Select(command => command.CommandType).ToArray());
     }
 
     private static SagaCoordinator CreateCoordinator(InMemorySagaRepository repository, RecordingCommandDispatcher dispatcher)

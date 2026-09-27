@@ -30,7 +30,7 @@ public sealed class SagaCoordinator(
                 [SagaCommandTypes.CancelBudgetCommand, SagaCommandTypes.CancelServiceOrderCommand]),
             [SagaEventTypes.WorkFailed] = new(
                 SagaState.WaitingProduction,
-                [SagaCommandTypes.CompensateWorkOrderCommand, SagaCommandTypes.ReturnServiceOrderToApprovedCommand])
+                [SagaCommandTypes.CancelBudgetCommand, SagaCommandTypes.CancelServiceOrderCommand])
         };
 
     public async Task HandleEventAsync(DomainEventMessage domainEvent, CancellationToken cancellationToken)
@@ -38,6 +38,12 @@ public sealed class SagaCoordinator(
         if (string.IsNullOrWhiteSpace(domainEvent.CorrelationId))
         {
             logger.LogWarning("Skipping event {EventType} because CorrelationId is missing.", domainEvent.EventType);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(domainEvent.EventType))
+        {
+            logger.LogWarning("Skipping event because EventType is missing for correlation {CorrelationId}.", domainEvent.CorrelationId);
             return;
         }
 
@@ -113,16 +119,9 @@ public sealed class SagaCoordinator(
             return;
         }
 
-        if (saga.CurrentState == SagaState.Compensating)
-        {
-            logger.LogInformation(
-                "Ignoring event {EventType} because saga {SagaId} is already compensating.",
-                domainEvent.EventType,
-                saga.Id);
-            return;
-        }
+        var isAlreadyCompensating = saga.CurrentState == SagaState.Compensating;
 
-        if (saga.CurrentState != compensation.ExpectedCurrentState)
+        if (!isAlreadyCompensating && saga.CurrentState != compensation.ExpectedCurrentState)
         {
             logger.LogWarning(
                 "Skipping compensation for saga {SagaId}. Event {EventType} expected state {Expected} but current is {Current}.",
@@ -133,8 +132,10 @@ public sealed class SagaCoordinator(
             return;
         }
 
-        saga.TransitionTo(SagaState.Compensating, domainEvent.EventType, domainEvent.Payload, domainEvent.OccurredAtUtc);
-        await sagaRepository.SaveChangesAsync(cancellationToken);
+        if (!isAlreadyCompensating)
+        {
+            saga.TransitionTo(SagaState.Compensating, domainEvent.EventType, domainEvent.Payload, domainEvent.OccurredAtUtc);
+        }
 
         foreach (var command in compensation.CommandTypes)
         {

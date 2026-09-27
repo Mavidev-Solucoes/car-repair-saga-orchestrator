@@ -25,6 +25,15 @@ public sealed class RabbitMqCommandDispatcher : ICommandDispatcher, IDisposable
     public Task DispatchAsync(CommandMessage command, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(command.CommandType))
+        {
+            throw new ArgumentException("CommandType is required.", nameof(command));
+        }
+
+        if (string.IsNullOrWhiteSpace(command.CorrelationId))
+        {
+            throw new ArgumentException("CorrelationId is required.", nameof(command));
+        }
 
         var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(command));
 
