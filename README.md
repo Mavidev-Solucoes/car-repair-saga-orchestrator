@@ -63,7 +63,8 @@ A migration inicial está em `src/Infrastructure/Persistence/Migrations/` com o 
 ## API
 
 - `GET /api/sagas/{correlationId}`: consulta o estado atual e o histórico da saga.
-- `GET /health`: endpoint de health check para PostgreSQL e RabbitMQ.
+- `GET /health`: readiness check com dependências reais (PostgreSQL e RabbitMQ).
+- `GET /health/live`: liveness check do processo para cenários de container/startup.
 - Swagger habilitado em ambiente de desenvolvimento.
 
 ## Executando localmente

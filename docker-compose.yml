@@ -31,7 +31,7 @@ services:
     environment:
       ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://+:8080
-      ConnectionStrings__PostgreSql: Host=postgres;Port=5432;Database=car_repair_saga_orchestrator;Username=postgres;******
+      ConnectionStrings__PostgreSql: Host=postgres;Port=5432;Database=car_repair_saga_orchestrator;Username=postgres;Pwd=postgres
       RabbitMq__HostName: rabbitmq
       RabbitMq__Port: 5672
       RabbitMq__UserName: guest

@@ -47,8 +47,10 @@ app.MapGet(
     .WithName("GetSagaByCorrelationId")
     .WithTags("Sagas")
     .WithOpenApi();
-app.MapHealthChecks("/health", new HealthCheckOptions
+app.MapHealthChecks("/health");
+app.MapHealthChecks("/health/live", new HealthCheckOptions
 {
+    Predicate = _ => false,
     ResultStatusCodes =
     {
         [HealthStatus.Healthy] = StatusCodes.Status200OK,
