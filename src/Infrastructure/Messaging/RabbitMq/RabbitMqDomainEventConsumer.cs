@@ -58,10 +58,13 @@ public sealed class RabbitMqDomainEventConsumer(
     {
         var factory = new ConnectionFactory
         {
+            AutomaticRecoveryEnabled = true,
             HostName = _options.HostName,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
             Port = _options.Port,
             UserName = _options.UserName,
             Password = _options.Password,
+            TopologyRecoveryEnabled = true,
             VirtualHost = _options.VirtualHost
         };
 

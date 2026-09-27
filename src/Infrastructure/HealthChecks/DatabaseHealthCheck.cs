@@ -1,10 +1,11 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Infrastructure.Persistence;
 
 namespace Infrastructure.HealthChecks;
 
-public sealed class DatabaseHealthCheck(SagaDbContext dbContext) : IHealthCheck
+public sealed class DatabaseHealthCheck(IServiceScopeFactory scopeFactory) : IHealthCheck
 {
     public async Task<HealthCheckResult> CheckHealthAsync(
         HealthCheckContext context,
@@ -12,6 +13,8 @@ public sealed class DatabaseHealthCheck(SagaDbContext dbContext) : IHealthCheck
     {
         try
         {
+            using var scope = scopeFactory.CreateScope();
+            var dbContext = scope.ServiceProvider.GetRequiredService<SagaDbContext>();
             var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
             return canConnect
                 ? HealthCheckResult.Healthy("PostgreSQL is reachable.")

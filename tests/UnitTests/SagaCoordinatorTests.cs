@@ -66,10 +66,10 @@ public sealed class SagaCoordinatorTests
     }
 
     [Theory]
-    [InlineData(SagaEventTypes.BudgetRejected, SagaCommandTypes.CancelServiceOrderCommand)]
-    [InlineData(SagaEventTypes.PaymentRejected, SagaCommandTypes.CancelBudgetCommand)]
-    [InlineData(SagaEventTypes.WorkFailed, SagaCommandTypes.CompensateWorkOrderCommand)]
-    public async Task HandleEventAsync_ShouldTriggerCompensation(string eventType, string firstCompensationCommand)
+    [InlineData(SagaEventTypes.BudgetRejected, new[] { SagaCommandTypes.CancelServiceOrderCommand })]
+    [InlineData(SagaEventTypes.PaymentRejected, new[] { SagaCommandTypes.CancelBudgetCommand, SagaCommandTypes.CancelServiceOrderCommand })]
+    [InlineData(SagaEventTypes.WorkFailed, new[] { SagaCommandTypes.CompensateWorkOrderCommand, SagaCommandTypes.ReturnServiceOrderToApprovedCommand })]
+    public async Task HandleEventAsync_ShouldTriggerCompensation(string eventType, string[] expectedCommands)
     {
         var repository = new InMemorySagaRepository();
         var dispatcher = new RecordingCommandDispatcher();
@@ -86,7 +86,7 @@ public sealed class SagaCoordinatorTests
         Assert.Equal(SagaState.Failed, saga.CurrentState);
         Assert.Equal(SagaState.Compensating, saga.History[^2].ToState);
         Assert.Equal(SagaState.Failed, saga.History[^1].ToState);
-        Assert.Equal(firstCompensationCommand, dispatcher.Commands[0].CommandType);
+        Assert.Equal(expectedCommands, dispatcher.Commands.Select(command => command.CommandType).ToArray());
     }
 
     [Fact]
