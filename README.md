@@ -42,14 +42,12 @@ O orquestrador não implementa regras de negócio dos serviços participantes. E
 - CloseServiceOrderCommand
 - CancelServiceOrderCommand
 - CancelBudgetCommand
-- CompensateWorkOrderCommand
-- ReturnServiceOrderToApprovedCommand
 
 ## Fluxos de Compensação
 
 - `BudgetRejected` → `CancelServiceOrderCommand`
 - `PaymentRejected` → `CancelBudgetCommand` → `CancelServiceOrderCommand`
-- `WorkFailed` → `CompensateWorkOrderCommand` → `ReturnServiceOrderToApprovedCommand`
+- `WorkFailed` → `CancelBudgetCommand` → `CancelServiceOrderCommand`
 
 ## Persistência
 

@@ -76,7 +76,7 @@ public sealed class RabbitMqDomainEventConsumer(
         {
             _channel.QueueBind(_options.DomainEventsQueue, _options.DomainEventsExchange, routingKey);
         }
-        _channel.BasicQos(prefetchSize: 0, prefetchCount: 10, global: false);
+        _channel.BasicQos(prefetchSize: 0, prefetchCount: 1, global: false);
 
         var consumer = new AsyncEventingBasicConsumer(_channel);
         consumer.Received += HandleReceivedAsync;
@@ -118,7 +118,8 @@ public sealed class RabbitMqDomainEventConsumer(
         catch (Exception exception)
         {
             logger.LogError(exception, "Error processing domain event message.");
-            _channel.BasicNack(args.DeliveryTag, multiple: false, requeue: true);
+            var shouldRequeue = !args.Redelivered;
+            _channel.BasicNack(args.DeliveryTag, multiple: false, requeue: shouldRequeue);
         }
     }
 
