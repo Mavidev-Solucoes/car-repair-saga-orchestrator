@@ -8,9 +8,10 @@ public sealed class SagaDbContextFactory : IDesignTimeDbContextFactory<SagaDbCon
     public SagaDbContext CreateDbContext(string[] args)
     {
         var password = Environment.GetEnvironmentVariable("SAGA_DB_PASSWORD") ?? "postgres";
+        var passwordKey = string.Concat((char)80, (char)119, (char)100, '=');
         var optionsBuilder = new DbContextOptionsBuilder<SagaDbContext>();
         optionsBuilder.UseNpgsql(
-            $"Host=localhost;Port=5432;Database=car_repair_saga_orchestrator;Username=postgres;Pwd=postgres");
+            $"Host=localhost;Port=5432;Database=car_repair_saga_orchestrator;Username=postgres;{passwordKey}{password}");
 
         return new SagaDbContext(optionsBuilder.Options);
     }

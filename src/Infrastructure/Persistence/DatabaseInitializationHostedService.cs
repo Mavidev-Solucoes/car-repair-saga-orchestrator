@@ -11,19 +11,23 @@ public sealed class DatabaseInitializationHostedService(
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        using (var scope = scopeFactory.CreateScope())
+        {
+            var dbContext = scope.ServiceProvider.GetRequiredService<SagaDbContext>();
+            var hasMigrations = dbContext.Database.GetMigrations().Any();
+            if (!hasMigrations)
+            {
+                throw new InvalidOperationException(
+                    "No EF Core migrations were found for SagaDbContext. Create and apply migrations before starting the service.");
+            }
+        }
+
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
                 using var scope = scopeFactory.CreateScope();
                 var dbContext = scope.ServiceProvider.GetRequiredService<SagaDbContext>();
-
-                var hasMigrations = dbContext.Database.GetMigrations().Any();
-                if (!hasMigrations)
-                {
-                    throw new InvalidOperationException(
-                        "No EF Core migrations were found for SagaDbContext. Create and apply migrations before starting the service.");
-                }
 
                 await dbContext.Database.MigrateAsync(stoppingToken);
                 return;

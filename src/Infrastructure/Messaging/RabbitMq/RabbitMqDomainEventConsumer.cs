@@ -42,7 +42,14 @@ public sealed class RabbitMqDomainEventConsumer(
             {
                 logger.LogWarning(exception, "RabbitMQ connection is unavailable. Retrying in 5 seconds.");
                 DisposeChannelAndConnection();
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
             }
         }
     }
