@@ -135,10 +135,16 @@ public sealed class SagaCoordinator(
         if (!isAlreadyCompensating)
         {
             saga.TransitionTo(SagaState.Compensating, domainEvent.EventType, domainEvent.Payload, domainEvent.OccurredAtUtc);
+            await sagaRepository.SaveChangesAsync(cancellationToken);
         }
 
         foreach (var command in compensation.CommandTypes)
         {
+            if (HasCompensationDispatchMarker(saga, command))
+            {
+                continue;
+            }
+
             await commandDispatcher.DispatchAsync(
                 new CommandMessage
                 {
@@ -147,11 +153,27 @@ public sealed class SagaCoordinator(
                     Payload = domainEvent.Payload
                 },
                 cancellationToken);
+
+            saga.TransitionTo(
+                SagaState.Compensating,
+                BuildCompensationDispatchMarker(command),
+                domainEvent.Payload,
+                domainEvent.OccurredAtUtc);
+
+            await sagaRepository.SaveChangesAsync(cancellationToken);
         }
 
         saga.TransitionTo(SagaState.Failed, "CompensationTriggered", domainEvent.Payload, domainEvent.OccurredAtUtc);
         await sagaRepository.SaveChangesAsync(cancellationToken);
     }
+
+    private static bool HasCompensationDispatchMarker(SagaInstance saga, string commandType)
+    {
+        var marker = BuildCompensationDispatchMarker(commandType);
+        return saga.History.Any(entry => entry.Trigger.Equals(marker, StringComparison.Ordinal));
+    }
+
+    private static string BuildCompensationDispatchMarker(string commandType) => $"CompensationCommandDispatched:{commandType}";
 
     private sealed record TransitionDefinition(
         SagaState ExpectedCurrentState,

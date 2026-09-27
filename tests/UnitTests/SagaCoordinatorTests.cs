@@ -144,7 +144,7 @@ public sealed class SagaCoordinatorTests
     }
 
     [Fact]
-    public async Task HandleEventAsync_ShouldCompleteCompensationWhenSagaAlreadyCompensating()
+    public async Task HandleEventAsync_ShouldResumeCompensationWithoutRedispatchingRecordedCommands()
     {
         var repository = new InMemorySagaRepository();
         var dispatcher = new RecordingCommandDispatcher();
@@ -155,13 +155,14 @@ public sealed class SagaCoordinatorTests
         saga.TransitionTo(SagaState.WaitingPayment, SagaEventTypes.BudgetApproved);
         saga.TransitionTo(SagaState.WaitingProduction, SagaEventTypes.PaymentApproved);
         saga.TransitionTo(SagaState.Compensating, SagaEventTypes.WorkFailed);
+        saga.TransitionTo(SagaState.Compensating, "CompensationCommandDispatched:CancelBudgetCommand");
         repository.Items[saga.CorrelationId] = saga;
 
         await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.WorkFailed), CancellationToken.None);
 
         Assert.Equal(SagaState.Failed, saga.CurrentState);
         Assert.Equal(
-            [SagaCommandTypes.CancelBudgetCommand, SagaCommandTypes.CancelServiceOrderCommand],
+            [SagaCommandTypes.CancelServiceOrderCommand],
             dispatcher.Commands.Select(command => command.CommandType).ToArray());
     }
 
