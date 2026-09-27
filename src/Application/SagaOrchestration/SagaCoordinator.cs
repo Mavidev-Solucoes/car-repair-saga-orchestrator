@@ -1,4 +1,5 @@
 using Application.SagaOrchestration.Abstractions;
+using Application.SagaOrchestration.Contracts;
 using Application.SagaOrchestration.Messages;
 using Domain.Sagas;
 using Microsoft.Extensions.Logging;
@@ -10,24 +11,27 @@ public sealed class SagaCoordinator(
     ICommandDispatcher commandDispatcher,
     ILogger<SagaCoordinator> logger) : ISagaCoordinator
 {
-    private const string SagaStartEvent = "RepairOrderCreated";
-
     private static readonly Dictionary<string, TransitionDefinition> ForwardTransitions =
         new(StringComparer.OrdinalIgnoreCase)
         {
-            ["RepairOrderCreated"] = new(SagaState.Started, SagaState.WaitingBudget, "RequestBudget"),
-            ["BudgetProvided"] = new(SagaState.WaitingBudget, SagaState.WaitingBudgetApproval, "RequestBudgetApproval"),
-            ["BudgetApproved"] = new(SagaState.WaitingBudgetApproval, SagaState.WaitingPayment, "RequestPayment"),
-            ["PaymentConfirmed"] = new(SagaState.WaitingPayment, SagaState.WaitingProduction, "StartProduction"),
-            ["ProductionCompleted"] = new(SagaState.WaitingProduction, SagaState.Completed, null)
+            [SagaEventTypes.ServiceOrderOpened] = new(SagaState.Started, SagaState.WaitingBudget, SagaCommandTypes.CreateBudgetCommand),
+            [SagaEventTypes.BudgetCreated] = new(SagaState.WaitingBudget, SagaState.WaitingBudgetApproval, null),
+            [SagaEventTypes.BudgetApproved] = new(SagaState.WaitingBudgetApproval, SagaState.WaitingPayment, SagaCommandTypes.ProcessPaymentCommand),
+            [SagaEventTypes.PaymentApproved] = new(SagaState.WaitingPayment, SagaState.WaitingProduction, SagaCommandTypes.CreateWorkOrderCommand),
+            [SagaEventTypes.WorkCompleted] = new(SagaState.WaitingProduction, SagaState.Completed, SagaCommandTypes.CloseServiceOrderCommand)
         };
 
-    private static readonly HashSet<string> FailureEvents =
-    [
-        "BudgetRejected",
-        "PaymentFailed",
-        "ProductionFailed"
-    ];
+    private static readonly Dictionary<string, CompensationDefinition> CompensationTransitions =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            [SagaEventTypes.BudgetRejected] = new(SagaState.WaitingBudgetApproval, [SagaCommandTypes.CancelServiceOrderCommand]),
+            [SagaEventTypes.PaymentRejected] = new(
+                SagaState.WaitingPayment,
+                [SagaCommandTypes.CancelBudgetCommand, SagaCommandTypes.CancelServiceOrderCommand]),
+            [SagaEventTypes.WorkFailed] = new(
+                SagaState.WaitingProduction,
+                [SagaCommandTypes.CompensateWorkOrderCommand, SagaCommandTypes.ReturnServiceOrderToApprovedCommand])
+        };
 
     public async Task HandleEventAsync(DomainEventMessage domainEvent, CancellationToken cancellationToken)
     {
@@ -41,7 +45,7 @@ public sealed class SagaCoordinator(
 
         if (saga is null)
         {
-            if (!domainEvent.EventType.Equals(SagaStartEvent, StringComparison.OrdinalIgnoreCase))
+            if (!domainEvent.EventType.Equals(SagaEventTypes.ServiceOrderOpened, StringComparison.OrdinalIgnoreCase))
             {
                 logger.LogWarning(
                     "Ignoring event {EventType} because saga for correlation {CorrelationId} does not exist yet.",
@@ -54,9 +58,9 @@ public sealed class SagaCoordinator(
             await sagaRepository.AddAsync(saga, cancellationToken);
         }
 
-        if (FailureEvents.Contains(domainEvent.EventType))
+        if (CompensationTransitions.TryGetValue(domainEvent.EventType, out var compensation))
         {
-            await StartCompensationAsync(saga, domainEvent, cancellationToken);
+            await StartCompensationAsync(saga, domainEvent, compensation, cancellationToken);
             return;
         }
 
@@ -101,6 +105,7 @@ public sealed class SagaCoordinator(
     private async Task StartCompensationAsync(
         SagaInstance saga,
         DomainEventMessage domainEvent,
+        CompensationDefinition compensation,
         CancellationToken cancellationToken)
     {
         if (saga.CurrentState is SagaState.Completed or SagaState.Failed)
@@ -108,21 +113,30 @@ public sealed class SagaCoordinator(
             return;
         }
 
-        var failedState = saga.CurrentState;
-        if (saga.CurrentState != SagaState.Compensating)
+        if (saga.CurrentState == SagaState.Compensating)
         {
-            saga.TransitionTo(SagaState.Compensating, domainEvent.EventType, domainEvent.Payload, domainEvent.OccurredAtUtc);
-            await sagaRepository.SaveChangesAsync(cancellationToken);
-        }
-        else
-        {
-            failedState = saga.History
-                .OrderByDescending(entry => entry.OccurredAtUtc)
-                .FirstOrDefault(entry => entry.ToState == SagaState.Compensating)?
-                .FromState ?? SagaState.Started;
+            logger.LogInformation(
+                "Ignoring event {EventType} because saga {SagaId} is already compensating.",
+                domainEvent.EventType,
+                saga.Id);
+            return;
         }
 
-        foreach (var command in BuildCompensationCommands(failedState))
+        if (saga.CurrentState != compensation.ExpectedCurrentState)
+        {
+            logger.LogWarning(
+                "Skipping compensation for saga {SagaId}. Event {EventType} expected state {Expected} but current is {Current}.",
+                saga.Id,
+                domainEvent.EventType,
+                compensation.ExpectedCurrentState,
+                saga.CurrentState);
+            return;
+        }
+
+        saga.TransitionTo(SagaState.Compensating, domainEvent.EventType, domainEvent.Payload, domainEvent.OccurredAtUtc);
+        await sagaRepository.SaveChangesAsync(cancellationToken);
+
+        foreach (var command in compensation.CommandTypes)
         {
             await commandDispatcher.DispatchAsync(
                 new CommandMessage
@@ -138,20 +152,12 @@ public sealed class SagaCoordinator(
         await sagaRepository.SaveChangesAsync(cancellationToken);
     }
 
-    private static IEnumerable<string> BuildCompensationCommands(SagaState failedState)
-    {
-        return failedState switch
-        {
-            SagaState.WaitingProduction => ["RefundPayment", "RevertBudgetApproval", "CancelBudgetRequest"],
-            SagaState.WaitingPayment => ["RevertBudgetApproval", "CancelBudgetRequest"],
-            SagaState.WaitingBudgetApproval => ["CancelBudgetRequest"],
-            SagaState.WaitingBudget => ["CancelRepairOrder"],
-            _ => ["CancelRepairOrder"]
-        };
-    }
-
     private sealed record TransitionDefinition(
         SagaState ExpectedCurrentState,
         SagaState NextState,
         string? CommandType);
+
+    private sealed record CompensationDefinition(
+        SagaState ExpectedCurrentState,
+        IReadOnlyCollection<string> CommandTypes);
 }

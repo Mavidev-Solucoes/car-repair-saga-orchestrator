@@ -1,25 +1,46 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 
 namespace Infrastructure.Persistence;
 
-public sealed class DatabaseInitializationHostedService(IServiceScopeFactory scopeFactory) : IHostedService
+public sealed class DatabaseInitializationHostedService(
+    IServiceScopeFactory scopeFactory,
+    ILogger<DatabaseInitializationHostedService> logger) : BackgroundService
 {
-    public async Task StartAsync(CancellationToken cancellationToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        using var scope = scopeFactory.CreateScope();
-        var dbContext = scope.ServiceProvider.GetRequiredService<SagaDbContext>();
-
-        var hasMigrations = dbContext.Database.GetMigrations().Any();
-        if (!hasMigrations)
+        using (var scope = scopeFactory.CreateScope())
         {
-            throw new InvalidOperationException(
-                "No EF Core migrations were found for SagaDbContext. Create and apply migrations before starting the service.");
+            var dbContext = scope.ServiceProvider.GetRequiredService<SagaDbContext>();
+            var hasMigrations = dbContext.Database.GetMigrations().Any();
+            if (!hasMigrations)
+            {
+                throw new InvalidOperationException(
+                    "No EF Core migrations were found for SagaDbContext. Create and apply migrations before starting the service.");
+            }
         }
 
-        await dbContext.Database.MigrateAsync(cancellationToken);
-    }
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var dbContext = scope.ServiceProvider.GetRequiredService<SagaDbContext>();
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+                await dbContext.Database.MigrateAsync(stoppingToken);
+                return;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Database migration could not be applied during startup. Retrying in 5 seconds.");
+                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+            }
+        }
+    }
 }

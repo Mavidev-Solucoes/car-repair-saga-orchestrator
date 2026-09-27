@@ -1,7 +1,8 @@
 using System.Text;
 using System.Text.Json;
-using Application.SagaOrchestration.Abstractions;
+using Application.SagaOrchestration.Commands;
 using Application.SagaOrchestration.Messages;
+using MediatR;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -21,16 +22,49 @@ public sealed class RabbitMqDomainEventConsumer(
     private IConnection? _connection;
     private IModel? _channel;
 
-    protected override Task ExecuteAsync(CancellationToken stoppingToken)
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _stoppingToken = stoppingToken;
 
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                StartConsumer();
+                await WaitUntilStoppedAsync(stoppingToken);
+                return;
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "RabbitMQ connection is unavailable. Retrying in 5 seconds.");
+                DisposeChannelAndConnection();
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                }
+                catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private void StartConsumer()
+    {
         var factory = new ConnectionFactory
         {
+            AutomaticRecoveryEnabled = true,
             HostName = _options.HostName,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
             Port = _options.Port,
             UserName = _options.UserName,
             Password = _options.Password,
+            TopologyRecoveryEnabled = true,
             VirtualHost = _options.VirtualHost
         };
 
@@ -38,7 +72,10 @@ public sealed class RabbitMqDomainEventConsumer(
         _channel = _connection.CreateModel();
         _channel.ExchangeDeclare(_options.DomainEventsExchange, ExchangeType.Topic, durable: true, autoDelete: false);
         _channel.QueueDeclare(_options.DomainEventsQueue, durable: true, exclusive: false, autoDelete: false);
-        _channel.QueueBind(_options.DomainEventsQueue, _options.DomainEventsExchange, routingKey: "#");
+        foreach (var routingKey in _options.DomainEventRoutingKeys.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            _channel.QueueBind(_options.DomainEventsQueue, _options.DomainEventsExchange, routingKey);
+        }
         _channel.BasicQos(prefetchSize: 0, prefetchCount: 10, global: false);
 
         var consumer = new AsyncEventingBasicConsumer(_channel);
@@ -49,7 +86,6 @@ public sealed class RabbitMqDomainEventConsumer(
             autoAck: false,
             consumer: consumer);
 
-        return WaitUntilStoppedAsync(stoppingToken);
     }
 
     private async Task HandleReceivedAsync(object sender, BasicDeliverEventArgs args)
@@ -74,8 +110,8 @@ public sealed class RabbitMqDomainEventConsumer(
             }
 
             using var scope = scopeFactory.CreateScope();
-            var coordinator = scope.ServiceProvider.GetRequiredService<ISagaCoordinator>();
-            await coordinator.HandleEventAsync(domainEvent, _stoppingToken);
+            var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+            await mediator.Send(new ProcessSagaEventCommand(domainEvent), _stoppingToken);
 
             _channel.BasicAck(args.DeliveryTag, multiple: false);
         }
@@ -88,9 +124,16 @@ public sealed class RabbitMqDomainEventConsumer(
 
     public override void Dispose()
     {
+        DisposeChannelAndConnection();
+        base.Dispose();
+    }
+
+    private void DisposeChannelAndConnection()
+    {
         _channel?.Dispose();
         _connection?.Dispose();
-        base.Dispose();
+        _channel = null;
+        _connection = null;
     }
 
     private static async Task WaitUntilStoppedAsync(CancellationToken stoppingToken)

@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Application.Common.Behaviors;
 using Application.SagaOrchestration;
 using Application.SagaOrchestration.Abstractions;
@@ -8,6 +9,7 @@ using System.Reflection;
 
 namespace Application;
 
+[ExcludeFromCodeCoverage]
 public static class DependencyInjection
 {
     public static IServiceCollection AddApplication(this IServiceCollection services)

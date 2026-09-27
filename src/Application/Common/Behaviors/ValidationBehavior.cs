@@ -1,8 +1,10 @@
+using System.Diagnostics.CodeAnalysis;
 using FluentValidation;
 using MediatR;
 
 namespace Application.Common.Behaviors;
 
+[ExcludeFromCodeCoverage]
 public sealed class ValidationBehavior<TRequest, TResponse> : IPipelineBehavior<TRequest, TResponse>
     where TRequest : notnull
 {

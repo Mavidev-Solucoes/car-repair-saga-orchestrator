@@ -1,3 +1,5 @@
+using Application.SagaOrchestration.Contracts;
+
 namespace Infrastructure.Messaging.RabbitMq;
 
 public sealed class RabbitMqOptions
@@ -12,4 +14,5 @@ public sealed class RabbitMqOptions
     public string DomainEventsExchange { get; init; } = "domain-events";
     public string DomainEventsQueue { get; init; } = "saga-orchestrator-events";
     public string CommandsExchange { get; init; } = "commands";
+    public string[] DomainEventRoutingKeys { get; init; } = [.. SagaEventTypes.All];
 }

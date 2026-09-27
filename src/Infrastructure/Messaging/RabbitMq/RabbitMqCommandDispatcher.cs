@@ -55,10 +55,13 @@ public sealed class RabbitMqCommandDispatcher : ICommandDispatcher, IDisposable
     {
         var factory = new ConnectionFactory
         {
+            AutomaticRecoveryEnabled = true,
             HostName = options.HostName,
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
             Port = options.Port,
             UserName = options.UserName,
             Password = options.Password,
+            TopologyRecoveryEnabled = true,
             VirtualHost = options.VirtualHost
         };
 
