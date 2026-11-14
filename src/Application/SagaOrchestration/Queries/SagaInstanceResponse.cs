@@ -8,6 +8,7 @@ public sealed class SagaInstanceResponse
     public Guid Id { get; init; }
     public string CorrelationId { get; init; } = string.Empty;
     public string CurrentState { get; init; } = string.Empty;
+    public string Context { get; init; } = "{}";
     public DateTime CreatedAtUtc { get; init; }
     public DateTime UpdatedAtUtc { get; init; }
     public IReadOnlyCollection<SagaHistoryResponse> History { get; init; } = [];

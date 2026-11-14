@@ -22,21 +22,24 @@ public sealed class RabbitMqCommandDispatcher : ICommandDispatcher, IDisposable
         _channel.ExchangeDeclare(_options.CommandsExchange, ExchangeType.Topic, durable: true, autoDelete: false);
     }
 
-    public Task DispatchAsync(CommandMessage command, CancellationToken cancellationToken)
+    public Task DispatchAsync(IntegrationMessage command, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(command));
+        var body = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(command, IntegrationMessageSerializer.Options));
 
         lock (_channelLock)
         {
             var properties = _channel.CreateBasicProperties();
             properties.Persistent = true;
             properties.ContentType = "application/json";
+            properties.MessageId = command.MessageId.ToString();
+            properties.CorrelationId = command.CorrelationId;
+            properties.Type = command.Type;
 
             _channel.BasicPublish(
                 exchange: _options.CommandsExchange,
-                routingKey: command.CommandType,
+                routingKey: command.Type,
                 mandatory: false,
                 basicProperties: properties,
                 body: body);

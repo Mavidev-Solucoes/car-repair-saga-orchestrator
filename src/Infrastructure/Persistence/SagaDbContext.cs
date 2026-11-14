@@ -18,6 +18,7 @@ public sealed class SagaDbContext(DbContextOptions<SagaDbContext> options) : DbC
             builder.Property(x => x.CorrelationId).IsRequired().HasMaxLength(120);
             builder.HasIndex(x => x.CorrelationId).IsUnique();
             builder.Property(x => x.CurrentState).IsRequired().HasConversion<string>().HasMaxLength(40);
+            builder.Property(x => x.Context).IsRequired().HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
             builder.Property(x => x.CreatedAtUtc).IsRequired();
             builder.Property(x => x.UpdatedAtUtc).IsRequired();
             builder.HasMany(x => x.History)

@@ -37,9 +37,9 @@ services:
       RabbitMq__UserName: guest
       RabbitMq__Password: guest
       RabbitMq__VirtualHost: /
-      RabbitMq__DomainEventsExchange: domain-events
-      RabbitMq__DomainEventsQueue: car-repair-saga-orchestrator
-      RabbitMq__CommandsExchange: commands
+      RabbitMq__DomainEventsExchange: car-repair.events
+      RabbitMq__DomainEventsQueue: saga-orchestrator.events
+      RabbitMq__CommandsExchange: car-repair.commands
     ports:
       - "8080:8080"
     depends_on:

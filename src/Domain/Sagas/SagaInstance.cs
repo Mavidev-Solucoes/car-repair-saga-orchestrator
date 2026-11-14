@@ -8,6 +8,11 @@ public sealed class SagaInstance
     public DateTime CreatedAtUtc { get; private set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; private set; } = DateTime.UtcNow;
 
+    /// <summary>
+    /// Objeto JSON com os dados acumulados dos eventos da saga. Vai como payload dos comandos.
+    /// </summary>
+    public string Context { get; private set; } = "{}";
+
     public List<SagaHistory> History { get; private set; } = [];
 
     private SagaInstance()
@@ -22,6 +27,17 @@ public sealed class SagaInstance
         }
 
         CorrelationId = correlationId;
+    }
+
+    public void UpdateContext(string context)
+    {
+        if (string.IsNullOrWhiteSpace(context))
+        {
+            throw new ArgumentException("Context is required.", nameof(context));
+        }
+
+        Context = context;
+        UpdatedAtUtc = DateTime.UtcNow;
     }
 
     public void TransitionTo(SagaState nextState, string trigger, string? details = null, DateTime? occurredAtUtc = null)

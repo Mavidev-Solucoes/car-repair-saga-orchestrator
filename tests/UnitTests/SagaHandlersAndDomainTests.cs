@@ -27,14 +27,35 @@ public sealed class SagaHandlersAndDomainTests
     }
 
     [Fact]
+    public void SagaInstance_ShouldStartWithEmptyContextAndAcceptUpdates()
+    {
+        var saga = new SagaInstance("SO-005");
+
+        Assert.Equal("{}", saga.Context);
+
+        saga.UpdateContext("{\"budgetId\":\"B-1\"}");
+
+        Assert.Equal("{\"budgetId\":\"B-1\"}", saga.Context);
+        Assert.Throws<ArgumentException>(() => saga.UpdateContext(" "));
+    }
+
+    [Fact]
+    public void SagaInstance_ShouldRequireTrigger()
+    {
+        var saga = new SagaInstance("SO-006");
+
+        Assert.Throws<ArgumentException>(() => saga.TransitionTo(SagaState.WaitingBudget, string.Empty));
+    }
+
+    [Fact]
     public async Task ProcessSagaEventCommandHandler_ShouldDelegateToCoordinator()
     {
         var coordinator = new SpySagaCoordinator();
         var handler = new ProcessSagaEventCommandHandler(coordinator);
-        var domainEvent = new DomainEventMessage
+        var domainEvent = new IntegrationMessage
         {
             CorrelationId = "SO-003",
-            EventType = "AnyEvent"
+            Type = "AnyEvent"
         };
 
         await handler.Handle(new ProcessSagaEventCommand(domainEvent), CancellationToken.None);
@@ -60,9 +81,9 @@ public sealed class SagaHandlersAndDomainTests
 
     private sealed class SpySagaCoordinator : ISagaCoordinator
     {
-        public DomainEventMessage? ReceivedEvent { get; private set; }
+        public IntegrationMessage? ReceivedEvent { get; private set; }
 
-        public Task HandleEventAsync(DomainEventMessage domainEvent, CancellationToken cancellationToken)
+        public Task HandleEventAsync(IntegrationMessage domainEvent, CancellationToken cancellationToken)
         {
             ReceivedEvent = domainEvent;
             return Task.CompletedTask;
