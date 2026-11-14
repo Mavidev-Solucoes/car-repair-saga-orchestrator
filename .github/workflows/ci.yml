@@ -103,6 +103,7 @@ jobs:
           reportgenerator \
             -reports:"TestResults/**/coverage.opencover.xml" \
             -targetdir:"TestResults/CoverageReport" \
+            -filefilters:"-**/Migrations/**" \
             -reporttypes:"HtmlInline_AzurePipelines;Cobertura;XmlSummary"
 
       - name: Enforce coverage threshold (80%)
