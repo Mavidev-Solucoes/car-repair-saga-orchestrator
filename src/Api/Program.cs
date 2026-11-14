@@ -60,3 +60,5 @@ app.MapHealthChecks("/health/live", new HealthCheckOptions
 });
 
 app.Run();
+
+public partial class Program;

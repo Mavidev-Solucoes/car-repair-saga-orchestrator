@@ -16,10 +16,12 @@ public sealed class SagaReadRepository(SagaDbContext dbContext) : ISagaReadRepos
                 Id = x.Id,
                 CorrelationId = x.CorrelationId,
                 CurrentState = x.CurrentState.ToString(),
+                Context = x.Context,
                 CreatedAtUtc = x.CreatedAtUtc,
                 UpdatedAtUtc = x.UpdatedAtUtc,
                 History = x.History
                     .OrderBy(entry => entry.OccurredAtUtc)
+                    .ThenBy(entry => entry.Id)
                     .Select(entry => new SagaHistoryResponse
                     {
                         Id = entry.Id,

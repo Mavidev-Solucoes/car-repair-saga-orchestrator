@@ -59,6 +59,8 @@ public sealed class RabbitMqDomainEventConsumer(
         var factory = new ConnectionFactory
         {
             AutomaticRecoveryEnabled = true,
+            // Obrigatório para AsyncEventingBasicConsumer no RabbitMQ.Client 6.
+            DispatchConsumersAsync = true,
             HostName = _options.HostName,
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5),
             Port = _options.Port,
@@ -98,12 +100,18 @@ public sealed class RabbitMqDomainEventConsumer(
         try
         {
             var json = Encoding.UTF8.GetString(args.Body.ToArray());
-            var domainEvent = JsonSerializer.Deserialize<DomainEventMessage>(json, new JsonSerializerOptions
+            IntegrationMessage? domainEvent;
+            try
             {
-                PropertyNameCaseInsensitive = true
-            });
+                domainEvent = JsonSerializer.Deserialize<IntegrationMessage>(json, IntegrationMessageSerializer.Options);
+            }
+            catch (JsonException exception)
+            {
+                logger.LogError(exception, "Discarding malformed domain event message.");
+                domainEvent = null;
+            }
 
-            if (domainEvent is null)
+            if (domainEvent is null || string.IsNullOrWhiteSpace(domainEvent.Type) || string.IsNullOrWhiteSpace(domainEvent.CorrelationId))
             {
                 _channel.BasicNack(args.DeliveryTag, multiple: false, requeue: false);
                 return;

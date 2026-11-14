@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Application.SagaOrchestration.Abstractions;
 using Application.SagaOrchestration.Contracts;
 using Application.SagaOrchestration.Messages;
@@ -33,17 +34,17 @@ public sealed class SagaCoordinator(
                 [SagaCommandTypes.CancelBudgetCommand, SagaCommandTypes.CancelServiceOrderCommand])
         };
 
-    public async Task HandleEventAsync(DomainEventMessage domainEvent, CancellationToken cancellationToken)
+    public async Task HandleEventAsync(IntegrationMessage domainEvent, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(domainEvent.CorrelationId))
         {
-            logger.LogWarning("Skipping event {EventType} because CorrelationId is missing.", domainEvent.EventType);
+            logger.LogWarning("Skipping event {EventType} because CorrelationId is missing.", domainEvent.Type);
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(domainEvent.EventType))
+        if (string.IsNullOrWhiteSpace(domainEvent.Type))
         {
-            logger.LogWarning("Skipping event because EventType is missing for correlation {CorrelationId}.", domainEvent.CorrelationId);
+            logger.LogWarning("Skipping event because Type is missing for correlation {CorrelationId}.", domainEvent.CorrelationId);
             return;
         }
 
@@ -51,11 +52,11 @@ public sealed class SagaCoordinator(
 
         if (saga is null)
         {
-            if (!domainEvent.EventType.Equals(SagaEventTypes.ServiceOrderOpened, StringComparison.OrdinalIgnoreCase))
+            if (!domainEvent.Type.Equals(SagaEventTypes.ServiceOrderOpened, StringComparison.OrdinalIgnoreCase))
             {
                 logger.LogWarning(
                     "Ignoring event {EventType} because saga for correlation {CorrelationId} does not exist yet.",
-                    domainEvent.EventType,
+                    domainEvent.Type,
                     domainEvent.CorrelationId);
                 return;
             }
@@ -64,15 +65,15 @@ public sealed class SagaCoordinator(
             await sagaRepository.AddAsync(saga, cancellationToken);
         }
 
-        if (CompensationTransitions.TryGetValue(domainEvent.EventType, out var compensation))
+        if (CompensationTransitions.TryGetValue(domainEvent.Type, out var compensation))
         {
             await StartCompensationAsync(saga, domainEvent, compensation, cancellationToken);
             return;
         }
 
-        if (!ForwardTransitions.TryGetValue(domainEvent.EventType, out var transition))
+        if (!ForwardTransitions.TryGetValue(domainEvent.Type, out var transition))
         {
-            logger.LogInformation("Ignoring unmapped event {EventType} for saga {SagaId}.", domainEvent.EventType, saga.Id);
+            logger.LogInformation("Ignoring unmapped event {EventType} for saga {SagaId}.", domainEvent.Type, saga.Id);
             return;
         }
 
@@ -81,28 +82,23 @@ public sealed class SagaCoordinator(
             logger.LogWarning(
                 "Skipping transition for saga {SagaId}. Event {EventType} expected state {Expected} but current is {Current}.",
                 saga.Id,
-                domainEvent.EventType,
+                domainEvent.Type,
                 transition.ExpectedCurrentState,
                 saga.CurrentState);
             return;
         }
 
+        var context = MergeContext(saga, domainEvent);
+
         saga.TransitionTo(
             transition.NextState,
-            domainEvent.EventType,
-            domainEvent.Payload,
+            domainEvent.Type,
+            SerializePayload(domainEvent),
             domainEvent.OccurredAtUtc);
 
         if (!string.IsNullOrWhiteSpace(transition.CommandType))
         {
-            await commandDispatcher.DispatchAsync(
-                new CommandMessage
-                {
-                    CommandType = transition.CommandType,
-                    CorrelationId = saga.CorrelationId,
-                    Payload = domainEvent.Payload
-                },
-                cancellationToken);
+            await commandDispatcher.DispatchAsync(BuildCommand(transition.CommandType, saga, context), cancellationToken);
         }
 
         await sagaRepository.SaveChangesAsync(cancellationToken);
@@ -110,7 +106,7 @@ public sealed class SagaCoordinator(
 
     private async Task StartCompensationAsync(
         SagaInstance saga,
-        DomainEventMessage domainEvent,
+        IntegrationMessage domainEvent,
         CompensationDefinition compensation,
         CancellationToken cancellationToken)
     {
@@ -126,15 +122,18 @@ public sealed class SagaCoordinator(
             logger.LogWarning(
                 "Skipping compensation for saga {SagaId}. Event {EventType} expected state {Expected} but current is {Current}.",
                 saga.Id,
-                domainEvent.EventType,
+                domainEvent.Type,
                 compensation.ExpectedCurrentState,
                 saga.CurrentState);
             return;
         }
 
+        var details = SerializePayload(domainEvent);
+        var context = MergeContext(saga, domainEvent);
+
         if (!isAlreadyCompensating)
         {
-            saga.TransitionTo(SagaState.Compensating, domainEvent.EventType, domainEvent.Payload, domainEvent.OccurredAtUtc);
+            saga.TransitionTo(SagaState.Compensating, domainEvent.Type, details, domainEvent.OccurredAtUtc);
             await sagaRepository.SaveChangesAsync(cancellationToken);
         }
 
@@ -145,27 +144,52 @@ public sealed class SagaCoordinator(
                 continue;
             }
 
-            await commandDispatcher.DispatchAsync(
-                new CommandMessage
-                {
-                    CommandType = command,
-                    CorrelationId = saga.CorrelationId,
-                    Payload = domainEvent.Payload
-                },
-                cancellationToken);
+            await commandDispatcher.DispatchAsync(BuildCommand(command, saga, context), cancellationToken);
 
             saga.TransitionTo(
                 SagaState.Compensating,
                 BuildCompensationDispatchMarker(command),
-                domainEvent.Payload,
+                details,
                 domainEvent.OccurredAtUtc);
 
             await sagaRepository.SaveChangesAsync(cancellationToken);
         }
 
-        saga.TransitionTo(SagaState.Failed, "CompensationTriggered", domainEvent.Payload, domainEvent.OccurredAtUtc);
+        saga.TransitionTo(SagaState.Failed, "CompensationTriggered", details, domainEvent.OccurredAtUtc);
         await sagaRepository.SaveChangesAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Junta o payload do evento no contexto da saga (a chave mais recente vence) e devolve o resultado.
+    /// </summary>
+    private static JsonObject MergeContext(SagaInstance saga, IntegrationMessage domainEvent)
+    {
+        var context = JsonNode.Parse(saga.Context) as JsonObject ?? [];
+
+        if (domainEvent.Payload is not null)
+        {
+            foreach (var (key, value) in domainEvent.Payload)
+            {
+                context[key] = value?.DeepClone();
+            }
+        }
+
+        saga.UpdateContext(context.ToJsonString());
+        return context;
+    }
+
+    private static IntegrationMessage BuildCommand(string commandType, SagaInstance saga, JsonObject context)
+    {
+        return new IntegrationMessage
+        {
+            Type = commandType,
+            CorrelationId = saga.CorrelationId,
+            OccurredAtUtc = DateTime.UtcNow,
+            Payload = (JsonObject)context.DeepClone()
+        };
+    }
+
+    private static string? SerializePayload(IntegrationMessage domainEvent) => domainEvent.Payload?.ToJsonString();
 
     private static bool HasCompensationDispatchMarker(SagaInstance saga, string commandType)
     {

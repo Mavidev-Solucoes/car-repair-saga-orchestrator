@@ -3,4 +3,4 @@ using MediatR;
 
 namespace Application.SagaOrchestration.Commands;
 
-public sealed record ProcessSagaEventCommand(DomainEventMessage DomainEvent) : IRequest;
+public sealed record ProcessSagaEventCommand(IntegrationMessage DomainEvent) : IRequest;

@@ -4,5 +4,5 @@ namespace Application.SagaOrchestration.Abstractions;
 
 public interface ISagaCoordinator
 {
-    Task HandleEventAsync(DomainEventMessage domainEvent, CancellationToken cancellationToken);
+    Task HandleEventAsync(IntegrationMessage domainEvent, CancellationToken cancellationToken);
 }

@@ -1,3 +1,4 @@
+using System.Text.Json.Nodes;
 using Application.SagaOrchestration;
 using Application.SagaOrchestration.Abstractions;
 using Application.SagaOrchestration.Contracts;
@@ -16,11 +17,11 @@ public sealed class SagaCoordinatorTests
         var dispatcher = new RecordingCommandDispatcher();
         var coordinator = CreateCoordinator(repository, dispatcher);
 
-        await coordinator.HandleEventAsync(new DomainEventMessage
+        await coordinator.HandleEventAsync(new IntegrationMessage
         {
             CorrelationId = "SO-001",
-            EventType = SagaEventTypes.ServiceOrderOpened,
-            Payload = "{\"serviceOrderId\":\"SO-001\"}"
+            Type = SagaEventTypes.ServiceOrderOpened,
+            Payload = new JsonObject { ["serviceOrderId"] = "SO-001" }
         }, CancellationToken.None);
 
         var saga = await repository.GetByCorrelationIdAsync("SO-001", CancellationToken.None);
@@ -32,7 +33,7 @@ public sealed class SagaCoordinatorTests
             dispatcher.Commands,
             command =>
             {
-                Assert.Equal(SagaCommandTypes.CreateBudgetCommand, command.CommandType);
+                Assert.Equal(SagaCommandTypes.CreateBudgetCommand, command.Type);
                 Assert.Equal("SO-001", command.CorrelationId);
             });
     }
@@ -62,7 +63,7 @@ public sealed class SagaCoordinatorTests
                 SagaCommandTypes.CreateWorkOrderCommand,
                 SagaCommandTypes.CloseServiceOrderCommand
             ],
-            dispatcher.Commands.Select(command => command.CommandType).ToArray());
+            dispatcher.Commands.Select(command => command.Type).ToArray());
     }
 
     [Theory]
@@ -86,7 +87,7 @@ public sealed class SagaCoordinatorTests
         Assert.Equal(SagaState.Failed, saga.CurrentState);
         Assert.Equal(SagaState.Compensating, saga.History[^2].ToState);
         Assert.Equal(SagaState.Failed, saga.History[^1].ToState);
-        Assert.Equal(expectedCommands, dispatcher.Commands.Select(command => command.CommandType).ToArray());
+        Assert.Equal(expectedCommands, dispatcher.Commands.Select(command => command.Type).ToArray());
     }
 
     [Fact]
@@ -116,10 +117,10 @@ public sealed class SagaCoordinatorTests
         var dispatcher = new RecordingCommandDispatcher();
         var coordinator = CreateCoordinator(repository, dispatcher);
 
-        await coordinator.HandleEventAsync(new DomainEventMessage
+        await coordinator.HandleEventAsync(new IntegrationMessage
         {
             CorrelationId = string.Empty,
-            EventType = SagaEventTypes.ServiceOrderOpened
+            Type = SagaEventTypes.ServiceOrderOpened
         }, CancellationToken.None);
 
         Assert.Empty(repository.Items);
@@ -133,10 +134,10 @@ public sealed class SagaCoordinatorTests
         var dispatcher = new RecordingCommandDispatcher();
         var coordinator = CreateCoordinator(repository, dispatcher);
 
-        await coordinator.HandleEventAsync(new DomainEventMessage
+        await coordinator.HandleEventAsync(new IntegrationMessage
         {
             CorrelationId = "SO-001",
-            EventType = string.Empty
+            Type = string.Empty
         }, CancellationToken.None);
 
         Assert.Empty(repository.Items);
@@ -163,7 +164,127 @@ public sealed class SagaCoordinatorTests
         Assert.Equal(SagaState.Failed, saga.CurrentState);
         Assert.Equal(
             [SagaCommandTypes.CancelServiceOrderCommand],
-            dispatcher.Commands.Select(command => command.CommandType).ToArray());
+            dispatcher.Commands.Select(command => command.Type).ToArray());
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldSendAccumulatedContextAsCommandPayload()
+    {
+        var repository = new InMemorySagaRepository();
+        var dispatcher = new RecordingCommandDispatcher();
+        var coordinator = CreateCoordinator(repository, dispatcher);
+
+        await coordinator.HandleEventAsync(CreateEvent(
+            SagaEventTypes.ServiceOrderOpened,
+            new JsonObject
+            {
+                ["serviceOrderId"] = "SO-001",
+                ["customerName"] = "Maria",
+                ["items"] = new JsonArray(new JsonObject { ["description"] = "Troca de óleo", ["unitPrice"] = 150m, ["quantity"] = 1 })
+            }), CancellationToken.None);
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.BudgetCreated, new JsonObject { ["budgetId"] = "B-1", ["totalAmount"] = 150m }), CancellationToken.None);
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.BudgetApproved, new JsonObject { ["budgetId"] = "B-1", ["totalAmount"] = 150m }), CancellationToken.None);
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.PaymentApproved, new JsonObject { ["paymentId"] = "P-1", ["amount"] = 150m }), CancellationToken.None);
+
+        var createWorkOrder = dispatcher.Commands.Single(command => command.Type == SagaCommandTypes.CreateWorkOrderCommand);
+        Assert.Equal("SO-001", createWorkOrder.CorrelationId);
+        Assert.NotNull(createWorkOrder.Payload);
+        Assert.Equal("Maria", createWorkOrder.Payload["customerName"]!.GetValue<string>());
+        Assert.Equal("B-1", createWorkOrder.Payload["budgetId"]!.GetValue<string>());
+        Assert.Equal("P-1", createWorkOrder.Payload["paymentId"]!.GetValue<string>());
+        Assert.Single(createWorkOrder.Payload["items"]!.AsArray());
+
+        var saga = await repository.GetByCorrelationIdAsync("SO-001", CancellationToken.None);
+        Assert.Contains("\"paymentId\":\"P-1\"", saga!.Context);
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldSendContextToCompensationCommands()
+    {
+        var repository = new InMemorySagaRepository();
+        var dispatcher = new RecordingCommandDispatcher();
+        var coordinator = CreateCoordinator(repository, dispatcher);
+
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.ServiceOrderOpened, new JsonObject { ["serviceOrderId"] = "SO-001" }), CancellationToken.None);
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.BudgetCreated, new JsonObject { ["budgetId"] = "B-1" }), CancellationToken.None);
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.BudgetApproved, new JsonObject { ["budgetId"] = "B-1" }), CancellationToken.None);
+        dispatcher.Commands.Clear();
+
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.PaymentRejected, new JsonObject { ["paymentId"] = "P-1", ["reason"] = "Cartão recusado" }), CancellationToken.None);
+
+        var cancelBudget = dispatcher.Commands.First();
+        Assert.Equal(SagaCommandTypes.CancelBudgetCommand, cancelBudget.Type);
+        Assert.Equal("B-1", cancelBudget.Payload!["budgetId"]!.GetValue<string>());
+        Assert.Equal("Cartão recusado", cancelBudget.Payload["reason"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldIgnoreRepeatedEventWithoutRedispatching()
+    {
+        var repository = new InMemorySagaRepository();
+        var dispatcher = new RecordingCommandDispatcher();
+        var coordinator = CreateCoordinator(repository, dispatcher);
+
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.ServiceOrderOpened), CancellationToken.None);
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.ServiceOrderOpened), CancellationToken.None);
+
+        Assert.Single(dispatcher.Commands);
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldIgnoreEventsForUnknownSaga()
+    {
+        var repository = new InMemorySagaRepository();
+        var dispatcher = new RecordingCommandDispatcher();
+        var coordinator = CreateCoordinator(repository, dispatcher);
+
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.BudgetCreated), CancellationToken.None);
+
+        Assert.Empty(repository.Items);
+        Assert.Empty(dispatcher.Commands);
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldIgnoreCompensationOutOfExpectedState()
+    {
+        var repository = new InMemorySagaRepository();
+        var dispatcher = new RecordingCommandDispatcher();
+        var coordinator = CreateCoordinator(repository, dispatcher);
+
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.ServiceOrderOpened), CancellationToken.None);
+        dispatcher.Commands.Clear();
+
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.WorkFailed), CancellationToken.None);
+
+        var saga = await repository.GetByCorrelationIdAsync("SO-001", CancellationToken.None);
+        Assert.Equal(SagaState.WaitingBudget, saga!.CurrentState);
+        Assert.Empty(dispatcher.Commands);
+    }
+
+    [Fact]
+    public async Task HandleEventAsync_ShouldIgnoreCompensationAfterSagaFinished()
+    {
+        var repository = new InMemorySagaRepository();
+        var dispatcher = new RecordingCommandDispatcher();
+        var coordinator = CreateCoordinator(repository, dispatcher);
+
+        await MoveSagaToExpectedFailureStateAsync(coordinator, SagaEventTypes.WorkFailed);
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.WorkCompleted), CancellationToken.None);
+        dispatcher.Commands.Clear();
+
+        await coordinator.HandleEventAsync(CreateEvent(SagaEventTypes.WorkFailed), CancellationToken.None);
+
+        Assert.Empty(dispatcher.Commands);
+    }
+
+    private static IntegrationMessage CreateEvent(string eventType, JsonObject payload)
+    {
+        return new IntegrationMessage
+        {
+            CorrelationId = "SO-001",
+            Type = eventType,
+            Payload = payload
+        };
     }
 
     private static SagaCoordinator CreateCoordinator(InMemorySagaRepository repository, RecordingCommandDispatcher dispatcher)
@@ -171,13 +292,13 @@ public sealed class SagaCoordinatorTests
         return new SagaCoordinator(repository, dispatcher, NullLogger<SagaCoordinator>.Instance);
     }
 
-    private static DomainEventMessage CreateEvent(string eventType)
+    private static IntegrationMessage CreateEvent(string eventType)
     {
-        return new DomainEventMessage
+        return new IntegrationMessage
         {
             CorrelationId = "SO-001",
-            EventType = eventType,
-            Payload = $"{{\"eventType\":\"{eventType}\"}}"
+            Type = eventType,
+            Payload = new JsonObject { ["lastEvent"] = eventType }
         };
     }
 
@@ -221,9 +342,9 @@ public sealed class SagaCoordinatorTests
 
     private sealed class RecordingCommandDispatcher : ICommandDispatcher
     {
-        public List<CommandMessage> Commands { get; } = [];
+        public List<IntegrationMessage> Commands { get; } = [];
 
-        public Task DispatchAsync(CommandMessage command, CancellationToken cancellationToken)
+        public Task DispatchAsync(IntegrationMessage command, CancellationToken cancellationToken)
         {
             Commands.Add(command);
             return Task.CompletedTask;

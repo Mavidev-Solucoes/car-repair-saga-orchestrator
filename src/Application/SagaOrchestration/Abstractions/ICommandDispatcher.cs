@@ -4,5 +4,5 @@ namespace Application.SagaOrchestration.Abstractions;
 
 public interface ICommandDispatcher
 {
-    Task DispatchAsync(CommandMessage command, CancellationToken cancellationToken);
+    Task DispatchAsync(IntegrationMessage command, CancellationToken cancellationToken);
 }

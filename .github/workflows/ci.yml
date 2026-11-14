@@ -84,7 +84,8 @@ jobs:
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.qualitygate.wait=true \
             /d:sonar.qualitygate.timeout=300 \
-            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml"
+            /d:sonar.cs.opencover.reportsPaths="TestResults/**/coverage.opencover.xml" \
+            /d:sonar.coverage.exclusions="**/Migrations/**"
 
       - name: Build
         run: dotnet build CarRepairSagaOrchestrator.sln --configuration $BUILD_CONFIGURATION --no-restore
@@ -103,6 +104,7 @@ jobs:
           reportgenerator \
             -reports:"TestResults/**/coverage.opencover.xml" \
             -targetdir:"TestResults/CoverageReport" \
+            -filefilters:"-**/Migrations/**" \
             -reporttypes:"HtmlInline_AzurePipelines;Cobertura;XmlSummary"
 
       - name: Enforce coverage threshold (80%)
