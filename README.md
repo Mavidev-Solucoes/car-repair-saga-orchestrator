@@ -128,3 +128,9 @@ Imagem publicada no GitHub Container Registry (`ghcr.io/${owner}/${repo}`) com a
 Secrets obrigatórios para CD:
 
 - Nenhum secret adicional. O workflow usa `GITHUB_TOKEN` automático do GitHub Actions com permissão `packages: write`.
+
+## Observabilidade (New Relic)
+
+A imagem traz o agente .NET do New Relic com o profiler desligado; no Kubernetes o ConfigMap liga o agente (`NEW_RELIC_APP_NAME=car-repair-saga-orchestrator`) e a license vem do Secret opcional `newrelic-license`.
+
+O trace distribuído atravessa o RabbitMQ: `MessageTracing` grava `traceparent`/`tracestate` (W3C) e os headers do New Relic em cada mensagem publicada e, no consumo, abre a transação `RabbitMQ/<tipo>` que continua o trace de quem publicou, com o atributo `correlationId` (id da OS). Detalhes e consultas NRQL no README do `car-repair-k8s-infra`, seção "Observabilidade: New Relic APM e trace distribuído".

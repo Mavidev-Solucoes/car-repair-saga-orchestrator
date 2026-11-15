@@ -36,6 +36,8 @@ public sealed class RabbitMqCommandDispatcher : ICommandDispatcher, IDisposable
             properties.MessageId = command.MessageId.ToString();
             properties.CorrelationId = command.CorrelationId;
             properties.Type = command.Type;
+            properties.Headers = new Dictionary<string, object>();
+            MessageTracing.Inject(properties.Headers);
 
             _channel.BasicPublish(
                 exchange: _options.CommandsExchange,
