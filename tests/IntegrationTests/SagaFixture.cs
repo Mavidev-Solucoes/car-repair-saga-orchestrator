@@ -55,20 +55,22 @@ public sealed class SagaFixture : IAsyncLifetime
         Password = "guest"
     }.CreateConnection();
 
-    public void PublishEvent(string type, string correlationId, JsonObject? payload = null)
+    public void PublishEvent(string type, string correlationId, JsonObject? payload = null, IDictionary<string, object>? headers = null)
     {
         var body = JsonSerializer.SerializeToUtf8Bytes(
             new IntegrationMessage { Type = type, CorrelationId = correlationId, Payload = payload ?? new JsonObject() },
             JsonOptions);
-        PublishRaw(type, body);
+        PublishRaw(type, body, headers);
     }
 
-    public void PublishRaw(string routingKey, byte[] body)
+    public void PublishRaw(string routingKey, byte[] body, IDictionary<string, object>? headers = null)
     {
         using var connection = CreateRawConnection();
         using var channel = connection.CreateModel();
         channel.ExchangeDeclare("car-repair.events", ExchangeType.Topic, durable: true, autoDelete: false);
-        channel.BasicPublish("car-repair.events", routingKey, null, body);
+        var properties = channel.CreateBasicProperties();
+        properties.Headers = headers;
+        channel.BasicPublish("car-repair.events", routingKey, properties, body);
     }
 
     public async Task WaitForConsumerAsync()
@@ -121,6 +123,7 @@ public sealed class CommandsProbe : IDisposable
     private readonly IModel _channel;
     private readonly string _queue;
     private readonly List<IntegrationMessage> _received = [];
+    private readonly Dictionary<Guid, IDictionary<string, object>?> _headers = [];
 
     public CommandsProbe(SagaFixture fixture)
     {
@@ -137,11 +140,15 @@ public sealed class CommandsProbe : IDisposable
     {
         while (_channel.BasicGet(_queue, true) is { } delivery)
         {
-            _received.Add(JsonSerializer.Deserialize<IntegrationMessage>(delivery.Body.Span, JsonOptions)!);
+            var message = JsonSerializer.Deserialize<IntegrationMessage>(delivery.Body.Span, JsonOptions)!;
+            _received.Add(message);
+            _headers[message.MessageId] = delivery.BasicProperties.Headers;
         }
 
         return Task.FromResult(_received.FirstOrDefault(message => message.Type == type && message.CorrelationId == correlationId));
     });
+
+    public IDictionary<string, object>? HeadersOf(IntegrationMessage message) => _headers.GetValueOrDefault(message.MessageId);
 
     public void Dispose()
     {

@@ -71,6 +71,27 @@ public sealed class SagaFlowTests(SagaFixture fixture)
     }
 
     [Fact]
+    public async Task Commands_ShouldContinueTheTraceOfTheEvent()
+    {
+        await fixture.WaitForConsumerAsync();
+        using var probe = new CommandsProbe(fixture);
+        var correlationId = Guid.NewGuid().ToString("D");
+        var traceId = System.Diagnostics.ActivityTraceId.CreateRandom().ToString();
+        var headers = new Dictionary<string, object>
+        {
+            ["traceparent"] = $"00-{traceId}-{System.Diagnostics.ActivitySpanId.CreateRandom()}-01"
+        };
+
+        fixture.PublishEvent("ServiceOrderOpened", correlationId, new JsonObject { ["items"] = new JsonArray() }, headers);
+        var command = await probe.WaitForAsync("CreateBudgetCommand", correlationId);
+
+        var traceparent = Infrastructure.Messaging.RabbitMq.MessageTracing.Read(probe.HeadersOf(command), "traceparent");
+        Assert.NotNull(traceparent);
+        Assert.Equal(traceId, traceparent!.Split('-')[1]);
+        Assert.DoesNotContain(headers["traceparent"].ToString()!.Split('-')[2], traceparent);
+    }
+
+    [Fact]
     public async Task InvalidMessages_ShouldBeDiscardedWithoutStoppingTheConsumer()
     {
         await fixture.WaitForConsumerAsync();

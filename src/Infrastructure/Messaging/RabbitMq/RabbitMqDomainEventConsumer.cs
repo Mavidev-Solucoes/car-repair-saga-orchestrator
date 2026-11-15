@@ -117,9 +117,12 @@ public sealed class RabbitMqDomainEventConsumer(
                 return;
             }
 
-            using var scope = scopeFactory.CreateScope();
-            var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
-            await mediator.Send(new ProcessSagaEventCommand(domainEvent), _stoppingToken);
+            await MessageTracing.ConsumeAsync(domainEvent.Type, domainEvent.CorrelationId, args.BasicProperties?.Headers, async () =>
+            {
+                using var scope = scopeFactory.CreateScope();
+                var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+                await mediator.Send(new ProcessSagaEventCommand(domainEvent), _stoppingToken);
+            });
 
             _channel.BasicAck(args.DeliveryTag, multiple: false);
         }
