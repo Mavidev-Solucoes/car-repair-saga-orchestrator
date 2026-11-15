@@ -19,3 +19,6 @@ obj/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Reqnroll (gerado no build)
+*.feature.cs
