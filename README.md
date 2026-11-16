@@ -134,3 +134,26 @@ Secrets obrigatórios para CD:
 A imagem traz o agente .NET do New Relic com o profiler desligado; no Kubernetes o ConfigMap liga o agente (`NEW_RELIC_APP_NAME=car-repair-saga-orchestrator`) e a license vem do Secret opcional `newrelic-license`.
 
 O trace distribuído atravessa o RabbitMQ: `MessageTracing` grava `traceparent`/`tracestate` (W3C) e os headers do New Relic em cada mensagem publicada e, no consumo, abre a transação `RabbitMQ/<tipo>` que continua o trace de quem publicou, com o atributo `correlationId` (id da OS). Detalhes e consultas NRQL no README do `car-repair-k8s-infra`, seção "Observabilidade: New Relic APM e trace distribuído".
+
+## Evidências de testes e cobertura — FIAP Fase 4
+
+- **Cobertura de linhas:** **93,59%**, acima dos **80%** exigidos, na execução de CI da branch `main` de **15/11/2026**.
+- **Evidência:** [GitHub Actions CI — testes, cobertura, SonarCloud e validação Docker aprovados](https://github.com/Mavidev-Solucoes/car-repair-saga-orchestrator/actions/runs/43690157854).
+- **Testes executados nessa evidência:** 21 testes unitários, 12 testes de integração e 5 cenários BDD aprovados.
+- **BDD em Gherkin/Reqnroll:** [`OrquestracaoOrdemDeServico.feature`](tests/BddTests/Features/OrquestracaoOrdemDeServico.feature), incluindo fluxo completo, recusas e compensações.
+- **E2E com os quatro microsserviços:** [workflow Kubernetes (kind) aprovado em 16/11/2026](https://github.com/Mavidev-Solucoes/car-repair-k8s-infra/actions/runs/43935058397), confirmando os estados finais nos cenários de sucesso, pagamento recusado e falha na execução.
+
+O workflow [`.github/workflows/ci.yml`](.github/workflows/ci.yml) exige cobertura mínima de 80%. O percentual documentado corresponde à execução vinculada e pode variar em novos commits.
+
+## Justificativa da estratégia de Saga
+
+Foi escolhida a **orquestração centralizada** para concentrar a decisão das transições e dos comandos de compensação no `car-repair-saga-orchestrator`, mantendo as regras de negócio e a persistência nos respectivos serviços. A estratégia torna explícito o fluxo de abertura da OS, aprovação do orçamento, pagamento, execução e fechamento, bem como os caminhos de cancelamento diante de recusas ou falhas. O estado e o histórico são persistidos no PostgreSQL do orquestrador, e os serviços se comunicam por eventos e comandos RabbitMQ em vez de acessar bancos de outros serviços.
+
+O [contrato de mensageria](docs/contrato-mensageria.md) detalha exchanges, eventos, comandos, `correlationId` e compensações. No fluxo validado pelo E2E, a falha de pagamento cancela orçamento/OS e a falha na execução estorna o pagamento e cancela orçamento/OS. O estado `Failed` indica que o orquestrador disparou a compensação; o teste E2E confirma separadamente os estados finais dos serviços participantes.
+
+## Artefatos de entrega
+
+- [Dockerfile](src/Api/Dockerfile), [manifests Kubernetes](k8s/base) e [pipelines CI/CD](.github/workflows).
+- Swagger/OpenAPI para consulta à Saga em ambiente de desenvolvimento.
+- [Infraestrutura Kubernetes e roteiro de demonstração](https://github.com/Mavidev-Solucoes/car-repair-k8s-infra).
+
